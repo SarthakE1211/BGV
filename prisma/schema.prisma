@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Partner {
+  id    String @id @default(uuid())
+  name  String
+}
+
+model Client {
+  id    String @id @default(uuid())
+  name  String
+}
+
+model CheckMatrix {
+  id        String @id @default(uuid())
+  partnerId String
+  clientId  String
+  checks    Json
+}
+model User {
+  id    String @id @default(cuid())
+  email String @unique
+  role  String
+}
