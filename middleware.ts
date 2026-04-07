@@ -1,13 +1,67 @@
-import { withAuth } from "next-auth/middleware";
+// src/middleware.ts
+import { withAuth, NextRequestWithAuth } from "next-auth/middleware";
+import { NextResponse } from "next/server";
+import { UserRole } from "@prisma/client";
 
-export default withAuth({
-    callbacks: {
-        authorized: ({ token }) => {
-            return !!token; // only logged-in users
-        },
+const ROLE_HIERARCHY: Record<UserRole, number> = {
+    [UserRole.SDM]: 0,
+    [UserRole.SPECIALIST]: 1,
+    [UserRole.HR_HEAD]: 2,
+};
+
+function meetsRole(userRole: UserRole, required: UserRole): boolean {
+    return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[required];
+}
+
+const HR_HEAD_ROUTES = ["/blacklist", "/partners", "/settings"];
+const SPECIALIST_ROUTES = ["/reports"];
+
+export default withAuth(
+    function middleware(req: NextRequestWithAuth) {
+        const { token } = req.nextauth;
+        const { pathname } = req.nextUrl;
+        const userRole = token?.role as UserRole | undefined;
+
+        if (!userRole) {
+            return NextResponse.redirect(new URL("/auth/signin", req.url));
+        }
+
+        if (HR_HEAD_ROUTES.some((r) => pathname.startsWith(r))) {
+            if (!meetsRole(userRole, UserRole.HR_HEAD)) {
+                return NextResponse.redirect(new URL("/unauthorized", req.url));
+            }
+        }
+
+        if (SPECIALIST_ROUTES.some((r) => pathname.startsWith(r))) {
+            if (!meetsRole(userRole, UserRole.SPECIALIST)) {
+                return NextResponse.redirect(new URL("/unauthorized", req.url));
+            }
+        }
+
+        const res = NextResponse.next();
+        res.headers.set("x-user-role", userRole);
+        res.headers.set("x-user-id", (token?.dbUserId as string) ?? "");
+        return res;
     },
-});
+    {
+        callbacks: {
+            authorized: ({ token }) => !!token,
+        },
+    }
+);
 
+/**
+ * Match ALL routes EXCEPT public ones:
+ *   /auth/*        — sign-in, error pages (public)
+ *   /api/auth/*    — NextAuth endpoints (must stay public)
+ *   /_next/*       — Next.js internals
+ *   static assets  — favicon, icons, images
+ *
+ * Every app page is protected by default.
+ * New pages added to the app are auto-protected — no manual listing needed.
+ */
 export const config = {
-    matcher: ["/dashboard"],
+    matcher: [
+        "/((?!auth|api/auth|_next/static|_next/image|favicon.ico|icons|images).*)",
+    ],
 };

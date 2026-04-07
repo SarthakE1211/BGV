@@ -1,34 +1,61 @@
-const { PrismaClient } = require("@prisma/client");
-
-const prisma = new PrismaClient({
-    datasourceUrl: process.env.DATABASE_URL,
-});
+import { PrismaClient } from "@prisma/client";
+const prisma = new PrismaClient();
 
 async function main() {
-    const partner = await prisma.partner.create({
-        data: { name: "Amazon" },
-    });
-
-    const client = await prisma.client.create({
-        data: { name: "US Hiring" },
-    });
-
-    await prisma.checkMatrix.create({
-        data: {
-            partnerId: partner.id,
-            clientId: client.id,
-            checks: { education: true, employment: true },
+    const partners = [
+        {
+            name: "HCL Technologies",
+            code: "HCL",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check", "Address Check"],
         },
-    });
+        {
+            name: "Cognizant",
+            code: "COG",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check"],
+        },
+        {
+            name: "LTIMindtree",
+            code: "LTM",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check", "Reference Check"],
+        },
+        {
+            name: "TCS",
+            code: "TCS",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check"],
+        },
+        {
+            name: "Wipro",
+            code: "WIP",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check", "Address Check"],
+        },
+        {
+            name: "Hexaware",
+            code: "HEX",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check"],
+        },
+        {
+            name: "Birlasoft",
+            code: "BIR",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check"],
+        },
+        {
+            name: "Mindsprint",
+            code: "MIN",
+            standardChecks: ["Employment Check", "Education Check", "Criminal Check"],
+        },
+    ];
+
+    for (const p of partners) {
+        await prisma.partner.upsert({
+            where: { code: p.code },
+            create: p,
+            update: { standardChecks: p.standardChecks },
+        });
+    }
+
+    console.log("✓ Partners seeded");
 }
 
 main()
-    .then(() => {
-        console.log("Seeded ✅");
-    })
-    .catch((e) => {
-        console.error(e);
-    })
-    .finally(async () => {
-        await prisma.$disconnect();
-    });
+    .catch(console.error)
+    .finally(() => prisma.$disconnect());

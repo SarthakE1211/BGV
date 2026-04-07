@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,24 +8,240 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Partner {
-  id    String @id @default(uuid())
-  name  String
+enum UserRole {
+  SDM
+  SPECIALIST
+  HR_HEAD
 }
 
-model Client {
-  id    String @id @default(uuid())
-  name  String
+enum BGVStatus {
+  PENDING
+  IN_PROGRESS
+  GREEN
+  AMBER
+  RED_FLAG
+  BLACKLISTED
 }
 
-model CheckMatrix {
-  id        String @id @default(uuid())
-  partnerId String
-  clientId  String
-  checks    Json
+enum CheckStatus {
+  PENDING
+  IN_PROGRESS
+  CLEARED
+  FAILED
 }
+
+enum RoleType {
+  FTE_W2
+  PRO
+  DISPATCH
+  BACKFILL
+}
+
+enum Region {
+  USA
+  CANADA
+  LATAM
+}
+
+enum BGVVendor {
+  DISA
+  PRECISEHIRE
+}
+
+enum Priority {
+  NORMAL
+  MEDIUM
+  HIGH
+}
+
+// ─── USERS (synced from Azure AD) ───
 model User {
-  id    String @id @default(cuid())
-  email String @unique
-  role  String
+  id              String       @id @default(uuid())
+  name            String
+  email           String       @unique
+  role            UserRole
+  azureAdId       String?      @unique @map("azure_ad_id")
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  submittedRequests BGVRequest[]  @relation("SubmittedBy")
+  approvedRequests  BGVRequest[]  @relation("ApprovedBy")
+  assignedChecks    BGVCheck[]    @relation("AssignedTo")
+  activityLogs      ActivityLog[]
+  blacklistEntries  BlacklistEntry[]
+
+  @@map("users")
+}
+
+// ─── CANDIDATES ───
+model Candidate {
+  id              String       @id @default(uuid())
+  name            String
+  email           String
+  phone           String?
+  dateOfBirth     DateTime?    @map("date_of_birth")
+  isBlacklisted   Boolean      @default(false) @map("is_blacklisted")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  bgvRequests     BGVRequest[]
+  blacklistEntries BlacklistEntry[]
+
+  @@index([name])                          // Name search
+  @@index([email])                         // Email lookup
+  @@map("candidates")
+}
+
+// ─── ITO PARTNERS ───
+model Partner {
+  id              String       @id @default(uuid())
+  name            String       @unique
+  code            String       @unique     // HCL, COG, LTM, TCS, WIP, HEX, BIR, MIN
+  standardChecks  Json?        @map("standard_checks")
+  isActive        Boolean      @default(true) @map("is_active")
+
+  clients         PartnerClient[]
+  bgvRequests     BGVRequest[]
+
+  @@map("partners")
+}
+
+// ─── PARTNER CLIENT ACCOUNTS (with region-specific checks) ───
+model PartnerClient {
+  id              String       @id @default(uuid())
+  partnerId       String       @map("partner_id")
+  clientName      String       @map("client_name")
+  usaChecks       Json?        @map("usa_checks")
+  canadaChecks    Json?        @map("canada_checks")
+  latamChecks     Json?        @map("latam_checks")
+  specialNotes    String?      @map("special_notes")
+
+  partner         Partner      @relation(fields: [partnerId], references: [id])
+  checkRequirements ClientCheckRequirement[]
+  bgvRequests     BGVRequest[]
+
+  @@unique([partnerId, clientName])
+  @@map("partner_clients")
+}
+
+// ─── CLIENT-SPECIFIC CHECK REQUIREMENTS ───
+model ClientCheckRequirement {
+  id              String       @id @default(uuid())
+  partnerClientId String       @map("partner_client_id")
+  checkType       String       @map("check_type")
+  region          Region       @default(USA)
+  isMandatory     Boolean      @default(true) @map("is_mandatory")
+  description     String?
+
+  partnerClient   PartnerClient @relation(fields: [partnerClientId], references: [id])
+
+  @@map("client_check_requirements")
+}
+
+// ─── BGV REQUESTS (main tracking entity) ───
+model BGVRequest {
+  id              String       @id @default(uuid())
+  requestNumber   String       @unique @map("request_number")  // BGV-2026-XXXX
+  candidateId     String       @map("candidate_id")
+  partnerId       String       @map("partner_id")
+  partnerClientId String?      @map("partner_client_id")
+  submittedById   String       @map("submitted_by_id")
+  approvedById    String?      @map("approved_by_id")
+  roleType        RoleType     @map("role_type")
+  region          Region       @default(USA)
+  bgvVendor       BGVVendor    @default(DISA) @map("bgv_vendor")
+  status          BGVStatus    @default(PENDING)
+  priority        Priority     @default(NORMAL)
+  bgvType         String       @default("STANDARD") @map("bgv_type")
+  deploymentDate  DateTime?    @map("deployment_date")
+  initiationDate  DateTime?    @map("initiation_date")
+  completionDate  DateTime?    @map("completion_date")
+  letterIssuedDate DateTime?   @map("letter_issued_date")
+  disaCost        Decimal?     @map("disa_cost")
+  notes           String?
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  candidate       Candidate    @relation(fields: [candidateId], references: [id])
+  partner         Partner      @relation(fields: [partnerId], references: [id])
+  partnerClient   PartnerClient? @relation(fields: [partnerClientId], references: [id])
+  submittedBy     User         @relation("SubmittedBy", fields: [submittedById], references: [id])
+  approvedBy      User?        @relation("ApprovedBy", fields: [approvedById], references: [id])
+  checks          BGVCheck[]
+  activityLogs    ActivityLog[]
+  emailLogs       EmailLog[]
+  blacklistEntry  BlacklistEntry?
+
+  @@index([status])
+  @@index([partnerId])
+  @@index([createdAt])
+  @@map("bgv_requests")
+}
+
+// ─── INDIVIDUAL BGV CHECKS ───
+model BGVCheck {
+  id              String       @id @default(uuid())
+  bgvRequestId    String       @map("bgv_request_id")
+  assignedToId    String?      @map("assigned_to_id")
+  checkType       String       @map("check_type")
+  requirementSource String?    @map("requirement_source")
+  status          CheckStatus  @default(PENDING)
+  startedAt       DateTime?    @map("started_at")
+  completedAt     DateTime?    @map("completed_at")
+  remarks         String?
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  bgvRequest      BGVRequest   @relation(fields: [bgvRequestId], references: [id])
+  assignedTo      User?        @relation("AssignedTo", fields: [assignedToId], references: [id])
+
+  @@index([bgvRequestId])
+  @@index([status])
+  @@map("bgv_checks")
+}
+
+// ─── BLACKLIST REGISTRY ───
+model BlacklistEntry {
+  id              String       @id @default(uuid())
+  candidateId     String       @map("candidate_id")
+  bgvRequestId    String       @unique @map("bgv_request_id")
+  failedCheck     String       @map("failed_check")
+  reason          String
+  blacklistedById String       @map("blacklisted_by_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  candidate       Candidate    @relation(fields: [candidateId], references: [id])
+  bgvRequest      BGVRequest   @relation(fields: [bgvRequestId], references: [id])
+  blacklistedBy   User         @relation(fields: [blacklistedById], references: [id])
+
+  @@map("blacklist_entries")
+}
+
+// ─── ACTIVITY LOG (audit trail) ───
+model ActivityLog {
+  id              String       @id @default(uuid())
+  bgvRequestId    String       @map("bgv_request_id")
+  performedById   String       @map("performed_by_id")
+  action          String
+  details         String?
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  bgvRequest      BGVRequest   @relation(fields: [bgvRequestId], references: [id])
+  performedBy     User         @relation(fields: [performedById], references: [id])
+
+  @@index([bgvRequestId])
+  @@map("activity_logs")
+}
+
+// ─── EMAIL LOG ───
+model EmailLog {
+  id              String       @id @default(uuid())
+  bgvRequestId    String?      @map("bgv_request_id")
+  triggerType     String       @map("trigger_type")
+  recipientEmail  String       @map("recipient_email")
+  subject         String
+  status          String       @default("SENT")
+  sentAt          DateTime     @default(now()) @map("sent_at")
+
+  bgvRequest      BGVRequest?  @relation(fields: [bgvRequestId], references: [id])
+
+  @@map("email_logs")
 }
