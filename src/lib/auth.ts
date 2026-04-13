@@ -25,10 +25,16 @@ export const authOptions: NextAuthOptions = {
          * Attaches role + dbUserId to the JWT.
          */
         async jwt({ token, account, profile }) {
+            console.log("token", token, account, profile);
+
             if (account && profile) {
+                console.log("account & profile undefined");
+
                 const azureAdId = token.sub!;
                 const email = token.email ?? "";
                 const name = token.name ?? "";
+                const role = token.role ?? "SDM";
+                const image = token.picture ?? null;
 
                 // Find or create user by azureAdId (Prisma upsert)
                 const user = await prisma.user.upsert({
@@ -37,14 +43,15 @@ export const authOptions: NextAuthOptions = {
                         azureAdId,
                         email,
                         name,
-                        // Default role for new users — change as needed
-                        role: UserRole.SDM,
+                        role,
+                        image,
                         isActive: true,
                     },
                     update: {
                         // Keep email/name in sync with Azure AD profile
                         email,
                         name,
+                        image
                     },
                     select: {
                         id: true,
@@ -70,6 +77,8 @@ export const authOptions: NextAuthOptions = {
          * Exposes role and user id on the client-accessible session object.
          */
         async session({ session, token }) {
+            console.log("session", session, token);
+
             if (session.user) {
                 session.user.id = token.dbUserId as string;
                 session.user.role = token.role as UserRole;

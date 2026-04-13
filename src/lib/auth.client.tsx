@@ -21,6 +21,8 @@ export function hasRole(userRole: UserRole, required: UserRole): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 export function useAuth() {
     const { data: session, status } = useSession();
+    console.log("useAuth called", session, status);
+
 
     return {
         user: session?.user ?? null,

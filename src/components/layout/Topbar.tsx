@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import { UserRole } from "@prisma/client";
+import { signOut } from "next-auth/react";
+import Image from "next/image";
 
 // ─── Route → page title + breadcrumb map ──────────────────────────────────────
 
@@ -69,11 +71,12 @@ interface TopbarProps {
     userRole: UserRole;
     /** Count of pending items needing attention (requests awaiting approval, etc.) */
     pendingCount?: number;
+    image?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Topbar({ userName, userRole, pendingCount = 0 }: TopbarProps) {
+export default function Topbar({ userName, userRole, pendingCount = 0, image }: TopbarProps) {
     const pathname = usePathname();
     const route = resolveRoute(pathname);
     const [searchOpen, setSearchOpen] = useState(false);
@@ -109,7 +112,12 @@ export default function Topbar({ userName, userRole, pendingCount = 0 }: TopbarP
         [UserRole.SPECIALIST]: "#34d399",
         [UserRole.HR_HEAD]: "#f59e0b",
     };
-
+    const handleLogout = () => {
+        signOut({
+            callbackUrl:
+                "https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=http://localhost:3000",
+        });
+    };
     return (
         <header style={styles.topbar}>
             {/* Left — breadcrumbs */}
@@ -211,7 +219,26 @@ export default function Topbar({ userName, userRole, pendingCount = 0 }: TopbarP
                 {/* User pill */}
                 <div style={styles.userPill}>
                     <div style={styles.userPillAvatar}>
-                        {userName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                        {image ? (
+                            <Image
+                                src={image}
+                                alt="user"
+                                width={28}
+                                height={28}
+                                style={{
+                                    borderRadius: "6px",
+                                    objectFit: "cover",
+                                }}
+                                unoptimized // ✅ important for base64 images
+                            />
+                        ) : (
+                            userName
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")
+                                .slice(0, 2)
+                                .toUpperCase()
+                        )}
                     </div>
                     <div style={styles.userPillInfo}>
                         <span style={styles.userPillName}>{userName.split(" ")[0]}</span>
@@ -220,7 +247,38 @@ export default function Topbar({ userName, userRole, pendingCount = 0 }: TopbarP
                         </span>
                     </div>
                 </div>
+                <button
+                    onClick={handleLogout}
+                    style={{
+                        padding: "10px 16px",
+                        background: "linear-gradient(135deg, #16971b, #0d9f26)",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "10px",
+                        fontSize: "14px",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        boxShadow: "0 4px 12px rgba(239, 68, 68, 0.3)",
+                        transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                        e.currentTarget.style.boxShadow = "0 6px 16px rgba(239, 68, 68, 0.4)";
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0)";
+                        e.currentTarget.style.boxShadow = "0 4px 12px rgba(239, 68, 68, 0.3)";
+                    }}
+                >
+                    {/* Icon */}
+                    {/* <span style={{ fontSize: "16px" }}>🚪</span> */}
+                    Logout
+                </button>
             </div>
+
         </header>
     );
 }

@@ -52,6 +52,7 @@ export default async function ProtectedLayout({
                     userName={user.name}
                     userRole={user.role}
                     pendingCount={pendingCount}
+                    image={user.image ?? undefined}
                 />
 
                 {/* Page content */}

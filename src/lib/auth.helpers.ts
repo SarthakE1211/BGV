@@ -24,6 +24,8 @@ const ROLE_HIERARCHY: Record<UserRole, number> = {
  */
 export async function requireAuth(minRole?: UserRole) {
     const session = await getServerSession(authOptions);
+    console.log("session called", session);
+
 
     if (!session?.user?.id) {
         redirect("/api/auth/signin");
@@ -33,6 +35,8 @@ export async function requireAuth(minRole?: UserRole) {
     const user = await prisma.user.findUnique({
         where: { id: session.user.id },
     });
+    console.log("user called", user);
+
 
     if (!user || !user.isActive) {
         redirect("/auth/error?error=AccountDisabled");
