@@ -6,19 +6,26 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
-  },
-  "prisma": {
-    "seed": "node prisma/seed.js"
+    "lint": "eslint",
+    "db:migrate": "ts-node --transpile-only db/migrate.ts",
+    "db:seed": "ts-node --transpile-only db/seed.ts",
+    "db:reset": "ts-node --transpile-only db/migrate.ts --reset",
+    "db:set-role": "ts-node --transpile-only db/set-role.ts",
+    "db:make-admin": "ts-node --transpile-only db/set-role.ts"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@hookform/resolvers": "^3.9.1",
+    "@tanstack/react-table": "^8.20.6",
+    "date-fns": "^4.1.0",
     "lucide-react": "^1.7.0",
+    "mysql2": "^3.11.5",
     "next": "16.2.2",
     "next-auth": "^4.24.13",
-    "prisma": "^5.22.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-hook-form": "^7.54.2",
+    "sonner": "^1.7.1",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -26,6 +33,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "dotenv": "^16.4.7",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
     "tailwindcss": "^4",

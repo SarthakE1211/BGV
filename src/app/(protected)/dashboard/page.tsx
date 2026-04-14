@@ -1,72 +1,31 @@
-// src/app/(protected)/layout.tsx
+// src/app/(protected)/dashboard/page.tsx
+
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { prisma } from "@/src/lib/prisma";
-import { BGVStatus } from "@prisma/client";
-import Sidebar from "@/src/components/layout/Sidebar";
-import Topbar from "@/src/components/layout/Topbar";
+import {
+    getDashboardStats,
+    getActiveRequests,
+    getPartnerBreakdown,
+} from "@/src/lib/dashboard";
+import StatCards from "@/src/components/dashboard/StatCards";
+import PartnerBreakdown from "@/src/components/dashboard/PartnerBreakdown";
+import ActiveRequestsTable from "@/src/components/dashboard/ActiveRequestsTable";
 
-/**
- * Protected layout — wraps every page under /(protected)/ with
- * the Sidebar and Topbar. requireAuth() redirects unauthenticated
- * users before any render happens.
- */
-export default async function ProtectedLayout({
-    children,
-}: {
-    children: React.ReactNode;
-}) {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
     const user = await requireAuth();
-    console.log("user", user);
 
-    // Derive initials from name (e.g. "Bilal Shaikh" → "BS")
-    const initials = user.name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase();
-
-    // Count pending requests for the notification badge
-    // HR Head sees all pending; SDM sees only their own
-    const pendingCount = await prisma.bGVRequest.count({
-        where: {
-            status: { in: [BGVStatus.PENDING, BGVStatus.IN_PROGRESS] },
-            ...(user.role === "SDM" ? { submittedById: user.id } : {}),
-        },
-    });
+    const [stats, breakdown, rows] = await Promise.all([
+        getDashboardStats(user.role, user.id),
+        getPartnerBreakdown(user.role, user.id),
+        getActiveRequests(user.role, user.id, 20),
+    ]);
 
     return (
-        <div style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
-            {/* Sidebar — sticky left panel */}
-            <Sidebar
-                role={user.role}
-                userName={user.name}
-                userEmail={user.email}
-                userInitials={initials}
-            />
-
-            {/* Main content area */}
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                {/* Topbar — sticky top bar */}
-                <Topbar
-                    userName={user.name}
-                    userRole={user.role}
-                    pendingCount={pendingCount}
-                    image={user.image ?? undefined}
-                />
-
-                {/* Page content */}
-                <main
-                    style={{
-                        flex: 1,
-                        overflowY: "auto",
-                        padding: "28px 32px",
-                        background: "#f8fafc",
-                    }}
-                >
-                    {children}
-                </main>
-            </div>
-        </div>
+        <>
+            <StatCards stats={stats} />
+            <PartnerBreakdown rows={breakdown} />
+            <ActiveRequestsTable rows={rows} />
+        </>
     );
 }

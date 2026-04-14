@@ -1,7 +1,7 @@
 // src/middleware.ts
 import { withAuth, NextRequestWithAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
-import { UserRole } from "@prisma/client";
+import { UserRole } from "@/src/lib/enums";
 
 const ROLE_HIERARCHY: Record<UserRole, number> = {
     [UserRole.SDM]: 0,
@@ -13,8 +13,8 @@ function meetsRole(userRole: UserRole, required: UserRole): boolean {
     return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[required];
 }
 
-const HR_HEAD_ROUTES = ["/blacklist", "/partners", "/settings"];
-const SPECIALIST_ROUTES = ["/reports"];
+const HR_HEAD_ROUTES = ["/partners", "/settings"];
+const SPECIALIST_ROUTES = ["/reports", "/blacklist", "/tracker"];
 
 export default withAuth(
     function middleware(req: NextRequestWithAuth) {

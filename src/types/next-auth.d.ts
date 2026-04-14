@@ -1,12 +1,12 @@
 // src/types/next-auth.d.ts
 import "next-auth";
 import "next-auth/jwt";
-import { UserRole } from "@prisma/client";
+import type { UserRole } from "@/src/lib/enums";
 
 declare module "next-auth" {
     interface Session {
         user: {
-            /** Prisma User.id (UUID) */
+            /** users.id from MySQL (cuid-style string) */
             id: string;
             /** Azure AD Object ID — used for upsert */
             azureAdId: string;

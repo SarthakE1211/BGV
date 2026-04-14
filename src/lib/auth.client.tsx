@@ -4,7 +4,7 @@
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { UserRole } from "@prisma/client";
+import { UserRole } from "@/src/lib/enums";
 
 const ROLE_HIERARCHY: Record<UserRole, number> = {
     [UserRole.SDM]: 0,

@@ -1,8 +1,10 @@
 // src/lib/auth.ts
 import { NextAuthOptions } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
-import { prisma } from "@/src/lib/prisma";
-import { UserRole } from "@prisma/client";
+import { execute, queryOne } from "@/src/lib/db";
+import { UserRole } from "@/src/lib/enums";
+import { cuid } from "@/src/lib/ids";
+import type { UserRow } from "@/src/lib/types";
 
 export const authOptions: NextAuthOptions = {
     providers: [
@@ -21,64 +23,58 @@ export const authOptions: NextAuthOptions = {
     callbacks: {
         /**
          * Runs after Azure AD returns tokens.
-         * Upserts the user in PostgreSQL via Prisma using azureAdId.
-         * Attaches role + dbUserId to the JWT.
+         * Upserts the user row via raw SQL keyed on azure_ad_id.
          */
         async jwt({ token, account, profile }) {
-            console.log("token", token, account, profile);
-
             if (account && profile) {
-                console.log("account & profile undefined");
-
                 const azureAdId = token.sub!;
-                const email = token.email ?? "";
-                const name = token.name ?? "";
-                const role = token.role ?? "SDM";
-                const image = token.picture ?? null;
+                const email = (token.email ?? "") as string;
+                const name = (token.name ?? "") as string;
+                const role = (token.role ?? UserRole.SDM) as UserRole;
+                const image = (token.picture ?? null) as string | null;
 
-                // Find or create user by azureAdId (Prisma upsert)
-                const user = await prisma.user.upsert({
-                    where: { azureAdId },
-                    create: {
-                        azureAdId,
-                        email,
-                        name,
-                        role,
-                        image,
-                        isActive: true,
-                    },
-                    update: {
-                        // Keep email/name in sync with Azure AD profile
-                        email,
-                        name,
-                        image
-                    },
-                    select: {
-                        id: true,
-                        role: true,
-                        isActive: true,
-                    },
-                });
+                const existing = await queryOne<UserRow>(
+                    "SELECT id, role, is_active FROM users WHERE azure_ad_id = ? LIMIT 1",
+                    [azureAdId]
+                );
 
-                // Block inactive users
-                if (!user.isActive) {
-                    throw new Error("AccountDisabled");
+                let userId: string;
+                let userRole: UserRole;
+                let isActive: boolean;
+
+                if (existing) {
+                    await execute(
+                        `UPDATE users
+                         SET email = ?, name = ?, image = ?
+                         WHERE id = ?`,
+                        [email, name, image, existing.id]
+                    );
+                    userId = existing.id;
+                    userRole = existing.role;
+                    isActive = Boolean(existing.is_active);
+                } else {
+                    const id = cuid();
+                    await execute(
+                        `INSERT INTO users (id, name, email, role, image, azure_ad_id, is_active)
+                         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+                        [id, name, email, role, image, azureAdId]
+                    );
+                    userId = id;
+                    userRole = role;
+                    isActive = true;
                 }
 
-                token.dbUserId = user.id;
-                token.role = user.role;
+                if (!isActive) throw new Error("AccountDisabled");
+
+                token.dbUserId = userId;
+                token.role = userRole;
                 token.azureAdId = azureAdId;
                 token.accessToken = account.access_token;
             }
             return token;
         },
 
-        /**
-         * Exposes role and user id on the client-accessible session object.
-         */
         async session({ session, token }) {
-            console.log("session", session, token);
-
             if (session.user) {
                 session.user.id = token.dbUserId as string;
                 session.user.role = token.role as UserRole;
@@ -99,9 +95,6 @@ export const authOptions: NextAuthOptions = {
     },
 
     events: {
-        /**
-         * Log sign-in activity — useful for audit trails in this BGV context.
-         */
         async signIn({ user }) {
             console.info(`[AUTH] Sign-in: ${user.email} at ${new Date().toISOString()}`);
         },
