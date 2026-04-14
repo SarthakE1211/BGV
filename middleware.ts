@@ -2,19 +2,7 @@
 import { withAuth, NextRequestWithAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 import { UserRole } from "@/src/lib/enums";
-
-const ROLE_HIERARCHY: Record<UserRole, number> = {
-    [UserRole.SDM]: 0,
-    [UserRole.SPECIALIST]: 1,
-    [UserRole.HR_HEAD]: 2,
-};
-
-function meetsRole(userRole: UserRole, required: UserRole): boolean {
-    return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[required];
-}
-
-const HR_HEAD_ROUTES = ["/partners", "/settings"];
-const SPECIALIST_ROUTES = ["/reports", "/blacklist", "/tracker"];
+import { ROUTE_ROLE_GUARDS, meetsRole } from "@/src/lib/auth.config";
 
 export default withAuth(
     function middleware(req: NextRequestWithAuth) {
@@ -26,14 +14,8 @@ export default withAuth(
             return NextResponse.redirect(new URL("/auth/signin", req.url));
         }
 
-        if (HR_HEAD_ROUTES.some((r) => pathname.startsWith(r))) {
-            if (!meetsRole(userRole, UserRole.HR_HEAD)) {
-                return NextResponse.redirect(new URL("/unauthorized", req.url));
-            }
-        }
-
-        if (SPECIALIST_ROUTES.some((r) => pathname.startsWith(r))) {
-            if (!meetsRole(userRole, UserRole.SPECIALIST)) {
+        for (const guard of ROUTE_ROLE_GUARDS) {
+            if (pathname.startsWith(guard.prefix) && !meetsRole(userRole, guard.minRole)) {
                 return NextResponse.redirect(new URL("/unauthorized", req.url));
             }
         }

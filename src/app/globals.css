@@ -448,6 +448,53 @@
     .form-row   { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
 
+    /* react-international-phone: defeat the generic `.form-group input` rule
+       so the flag-selector button and number input sit side-by-side instead
+       of the input stretching to 100% and hiding the button. */
+    .form-group .react-international-phone-input-container {
+        display: flex;
+        width: 100%;
+    }
+    .form-group .react-international-phone-input-container .react-international-phone-country-selector-button {
+        flex: 0 0 auto;
+        width: auto;
+        height: 32px;
+        padding: 0 6px;
+        margin: 0;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-right: none;
+        border-top-left-radius: 5px;
+        border-bottom-left-radius: 5px;
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+    .form-group .react-international-phone-input-container .react-international-phone-input {
+        flex: 1 1 auto;
+        width: auto;
+        height: 32px;
+        padding: 7px 10px;
+        border: 1px solid var(--border);
+        border-top-left-radius: 0;
+        border-bottom-left-radius: 0;
+        border-top-right-radius: 5px;
+        border-bottom-right-radius: 5px;
+        font-size: 12px;
+        font-family: inherit;
+        outline: none;
+        background: #fff;
+        color: var(--text);
+    }
+    .form-group .react-international-phone-input-container .react-international-phone-input:focus,
+    .form-group .react-international-phone-input-container .react-international-phone-country-selector-button:focus {
+        border-color: var(--primary);
+    }
+    /* Flag-dropdown list sits above form cards. */
+    .react-international-phone-country-selector-dropdown {
+        z-index: 250;
+        max-height: 260px;
+    }
+
     /* Search bar */
     .search-bar { display: flex; gap: 8px; margin-bottom: 16px; }
     .search-bar input {
@@ -703,6 +750,10 @@
     @keyframes toastIn {
         from { transform: translateX(100%); opacity: 0; }
         to   { transform: translateX(0);    opacity: 1; }
+    }
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
     }
 
     /* Pagination */

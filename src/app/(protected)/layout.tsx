@@ -27,8 +27,6 @@ export default async function ProtectedLayout({
                WHERE status IN ('PENDING','IN_PROGRESS')`,
         user.role === "SDM" ? [user.id] : []
     );
-    console.log("row",row);
-    
     const pendingCount = Number(row?.n ?? 0);
 
     return (

@@ -1,16 +1,12 @@
 // src/lib/auth.helpers.ts
+import { cache } from "react";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/src/lib/auth";
 import { redirect } from "next/navigation";
 import { queryOne } from "@/src/lib/db";
 import { UserRole } from "@/src/lib/enums";
+import { ROLE_HIERARCHY, meetsRole } from "@/src/lib/auth.config";
 import type { UserRow } from "@/src/lib/types";
-
-const ROLE_HIERARCHY: Record<UserRole, number> = {
-    [UserRole.SDM]: 0,
-    [UserRole.SPECIALIST]: 1,
-    [UserRole.HR_HEAD]: 2,
-};
 
 export interface AuthedUser {
     id: string;
@@ -20,6 +16,18 @@ export interface AuthedUser {
     image: string | null;
     isActive: boolean;
 }
+
+// React's cache() dedupes within a single request so layout + page + nested
+// server components that each call requireAuth() share one DB round-trip.
+const loadAuthedUser = cache(async (sessionUserId: string): Promise<UserRow | null> => {
+    return queryOne<UserRow>(
+        `SELECT id, name, email, role, image, is_active
+         FROM users
+         WHERE id = ?
+         LIMIT 1`,
+        [sessionUserId]
+    );
+});
 
 /**
  * Use at the top of any server component or server action.
@@ -32,13 +40,7 @@ export async function requireAuth(minRole?: UserRole): Promise<AuthedUser> {
         redirect("/api/auth/signin");
     }
 
-    const row = await queryOne<UserRow>(
-        `SELECT id, name, email, role, image, is_active
-         FROM users
-         WHERE id = ?
-         LIMIT 1`,
-        [session.user.id]
-    );
+    const row = await loadAuthedUser(session.user.id);
 
     if (!row || !row.is_active) {
         redirect("/auth/error?error=AccountDisabled");
@@ -64,6 +66,5 @@ export async function getSessionUser() {
     return session?.user ?? null;
 }
 
-export function hasRole(userRole: UserRole, required: UserRole): boolean {
-    return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[required];
-}
+// Backwards-compatible alias for meetsRole (finding #1 consolidation).
+export { meetsRole as hasRole };

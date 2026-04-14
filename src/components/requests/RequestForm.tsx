@@ -9,8 +9,10 @@
 // Submit hits the createBGVRequest server action, which runs the 5-step flow
 // (blacklist gate → candidate upsert → request insert → checks insert → log).
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { PhoneInput } from "react-international-phone";
+import "react-international-phone/style.css";
 import {
     createBGVRequest,
     type CreateBGVRequestInput,
@@ -18,6 +20,15 @@ import {
 } from "@/src/actions/requests";
 import type { PartnerOption } from "@/src/lib/partners";
 import type { Region, RoleType, Priority } from "@/src/lib/enums";
+
+// Map the form's region enum to the library's ISO-2 country code. Used as
+// the initial country in the phone picker — the user can change it from the
+// flag dropdown afterwards.
+const REGION_DEFAULT_COUNTRY: Record<Region, string> = {
+    USA: "us",
+    CANADA: "ca",
+    LATAM: "mx",
+};
 
 interface ResolvedCheckUI {
     checkType: string;
@@ -68,6 +79,15 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
             null
         );
     const [submitting, startSubmit] = useTransition();
+
+    // Pick the initial flag based on whatever region the form boots with,
+    // then leave it to the user. Deliberately not reactive — changing region
+    // mid-form shouldn't wipe a phone the user has already typed.
+    const initialPhoneCountry = useMemo(
+        () => REGION_DEFAULT_COUNTRY[form.region] ?? "us",
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        []
+    );
 
     const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
         setForm((f) => ({ ...f, [key]: value }));
@@ -211,11 +231,11 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
             <div className="form-row-3">
                 <div className="form-group">
                     <label>Phone Number</label>
-                    <input
-                        type="tel"
-                        placeholder="+1 (555) 000-0000"
+                    <PhoneInput
+                        defaultCountry={initialPhoneCountry}
                         value={form.candidatePhone}
-                        onChange={(e) => set("candidatePhone", e.target.value)}
+                        onChange={(phone) => set("candidatePhone", phone)}
+                        inputProps={{ name: "candidatePhone" }}
                     />
                 </div>
                 <div className="form-group">

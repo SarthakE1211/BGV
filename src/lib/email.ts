@@ -7,6 +7,7 @@
 
 import { execute } from "@/src/lib/db";
 import { cuid } from "@/src/lib/ids";
+import { logger } from "@/src/lib/logger";
 
 export type EmailTrigger =
     | "REQUEST_SUBMITTED"
@@ -45,7 +46,11 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
             ]
         );
     } catch (err) {
-        console.error("[email] dispatch failed:", err);
+        logger.error("email.dispatch failed", {
+            err,
+            trigger: payload.trigger,
+            recipient: payload.recipient,
+        });
         // Still record the attempt
         await execute(
             `INSERT INTO email_logs
@@ -64,7 +69,9 @@ export async function sendEmail(payload: EmailPayload): Promise<void> {
 
 async function dispatch(payload: EmailPayload) {
     // TODO: replace with Microsoft Graph send via lib/graph.ts.
-    console.info(
-        `[email] ${payload.trigger} → ${payload.recipient} :: ${payload.subject}`
-    );
+    logger.info("email.dispatch", {
+        trigger: payload.trigger,
+        recipient: payload.recipient,
+        subject: payload.subject,
+    });
 }

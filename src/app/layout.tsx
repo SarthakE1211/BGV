@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,7 +12,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
     return (
         <html lang="en" suppressHydrationWarning>
-            <body className="bgv-app">{children}</body>
+            <body className="bgv-app">
+                {children}
+                <Toaster position="top-right" richColors closeButton />
+            </body>
         </html>
     );
 }
