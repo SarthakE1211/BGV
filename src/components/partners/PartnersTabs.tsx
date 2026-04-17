@@ -7,6 +7,7 @@ import { useTransition } from "react";
 interface Props {
     current: string;
     counts: {
+        ALL: number;
         HCL: number;
         COG: number;
         LTM: number;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 const TABS: Array<{ id: string; label: string }> = [
+    { id: "ALL", label: "All Partners" },
     { id: "HCL", label: "HCL Clients" },
     { id: "COG", label: "Cognizant Accounts" },
     { id: "LTM", label: "LTIMindtree" },
@@ -33,7 +35,7 @@ export default function PartnersTabs({ current, counts }: Props) {
 
     const setTab = (id: string) => {
         const sp = new URLSearchParams(params.toString());
-        if (id === "HCL") sp.delete("tab");
+        if (id === "ALL") sp.delete("tab");
         else sp.set("tab", id);
         startTransition(() => {
             router.replace(`${pathname}?${sp.toString()}`, { scroll: false });

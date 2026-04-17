@@ -10,6 +10,7 @@ import type {
     CheckStatus,
     RoleType,
     Region,
+    UserRole,
 } from "@/src/lib/enums";
 
 export const PAGE_SIZE = 50;
@@ -33,6 +34,16 @@ export const CHECK_CATEGORIES: CheckCategory[] = [
     "OTHER",
 ];
 
+export const CATEGORY_LABEL: Record<CheckCategory, string> = {
+    CRIMINAL: "Criminal",
+    EDUCATION: "Education",
+    EMPLOYMENT: "Employment",
+    DRUG: "Drug Test",
+    CREDIT: "Credit",
+    SSN: "SSN/Addr",
+    OTHER: "Other",
+};
+
 export interface EmployeeRow {
     requestId: string;
     requestNumber: string;
@@ -46,6 +57,7 @@ export interface EmployeeRow {
     region: Region;
     status: BGVStatus;
     letterIssuedDate: Date | null;
+    hasLetterDocx: boolean;
     approvedByName: string | null;
     isBlacklisted: boolean;
     /** Per-category "worst" status. FAILED > PENDING/IN_PROGRESS > CLEARED > null. */
@@ -59,6 +71,20 @@ export type EmployeeTab = "all" | "green" | "amber" | "red" | "blacklisted";
 export interface EmployeeFilters {
     q?: string | null;
     tab?: EmployeeTab;
+}
+
+// Role-based scope — identical to the Requests page.
+//   SDM        → only requests they submitted
+//   SPECIALIST → only requests assigned to them
+//   HR_HEAD    → all
+function roleScope(role: UserRole, userId: string) {
+    if (role === "SDM") {
+        return { sql: "AND r.submitted_by_id = ?", params: [userId] };
+    }
+    if (role === "SPECIALIST") {
+        return { sql: "AND r.assigned_specialist_id = ?", params: [userId] };
+    }
+    return { sql: "", params: [] as string[] };
 }
 
 // Categorize a check type string into one of the canonical buckets.
@@ -111,7 +137,7 @@ function buildWhere(f: EmployeeFilters): { sql: string; params: unknown[] } {
             conds.push("r.status = 'RED_FLAG'");
             break;
         case "blacklisted":
-            conds.push("(r.status = 'BLACKLISTED' OR c.is_blacklisted = 1)");
+            conds.push("r.status = 'BLACKLISTED'");
             break;
         default:
             break;
@@ -136,6 +162,7 @@ interface RawRow {
     region: Region;
     status: BGVStatus;
     letter_issued_date: Date | null;
+    has_letter_docx: 0 | 1;
     approved_by_name: string | null;
     is_blacklisted: 0 | 1;
 }
@@ -148,9 +175,12 @@ interface CheckRow {
 
 export async function listEmployees(
     filters: EmployeeFilters,
-    page: number
+    page: number,
+    role: UserRole,
+    userId: string
 ): Promise<{ rows: EmployeeRow[]; total: number; page: number }> {
     const where = buildWhere(filters);
+    const scope = roleScope(role, userId);
     const safePage = Math.max(1, Math.floor(page));
     const offset = (safePage - 1) * PAGE_SIZE;
 
@@ -160,11 +190,17 @@ export async function listEmployees(
         JOIN partners p        ON p.id = r.partner_id
         LEFT JOIN partner_clients pc ON pc.id = r.partner_client_id
         LEFT JOIN users approver     ON approver.id = r.approved_by_id
-        ${where.sql}
+        WHERE r.status != 'PENDING'
+        ${scope.sql}
+        ${where.sql ? "AND " + where.sql.replace(/^WHERE\s+/i, "") : ""}
     `;
 
+    // Scope params come BEFORE filter params because the scope clause is
+    // interpolated inside `base` before the where.sql suffix.
+    const allParams = [...scope.params, ...where.params];
+
     const [countRow, rawRows] = await Promise.all([
-        queryOne<{ n: number }>(`SELECT COUNT(*) AS n ${base}`, where.params),
+        queryOne<{ n: number }>(`SELECT COUNT(*) AS n ${base}`, allParams),
         query<RawRow>(
             `SELECT
                 r.id,
@@ -179,12 +215,13 @@ export async function listEmployees(
                 r.region,
                 r.status,
                 r.letter_issued_date,
+                (r.letter_docx IS NOT NULL) AS has_letter_docx,
                 approver.name AS approved_by_name,
                 c.is_blacklisted
              ${base}
              ORDER BY r.created_at DESC
              LIMIT ${PAGE_SIZE} OFFSET ${offset}`,
-            where.params
+            allParams
         ),
     ]);
 
@@ -246,6 +283,7 @@ export async function listEmployees(
             region: r.region,
             status: r.status,
             letterIssuedDate: r.letter_issued_date,
+            hasLetterDocx: Boolean(r.has_letter_docx),
             approvedByName: r.approved_by_name,
             isBlacklisted: Boolean(r.is_blacklisted),
             checksByCategory: bucket.checks,
@@ -268,7 +306,11 @@ export interface EmployeeTabCounts {
     blacklisted: number;
 }
 
-export async function getEmployeeTabCounts(): Promise<EmployeeTabCounts> {
+export async function getEmployeeTabCounts(
+    role: UserRole,
+    userId: string
+): Promise<EmployeeTabCounts> {
+    const scope = roleScope(role, userId);
     const row = await queryOne<{
         all: number;
         green: number;
@@ -281,9 +323,12 @@ export async function getEmployeeTabCounts(): Promise<EmployeeTabCounts> {
             COALESCE(SUM(r.status = 'GREEN'), 0)                                    AS green,
             COALESCE(SUM(r.status IN ('AMBER','IN_PROGRESS','PENDING')), 0)         AS amber,
             COALESCE(SUM(r.status = 'RED_FLAG'), 0)                                 AS red,
-            COALESCE(SUM(r.status = 'BLACKLISTED' OR c.is_blacklisted = 1), 0)      AS blacklisted
+            COALESCE(SUM(r.status = 'BLACKLISTED'), 0)                               AS blacklisted
          FROM bgv_requests r
-         JOIN candidates c ON c.id = r.candidate_id`
+         JOIN candidates c ON c.id = r.candidate_id
+         WHERE r.status != 'PENDING'
+         ${scope.sql}`,
+        scope.params
     );
     return {
         all: Number(row?.all ?? 0),

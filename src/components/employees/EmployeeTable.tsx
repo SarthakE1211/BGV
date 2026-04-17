@@ -5,22 +5,16 @@ import StatusBadge from "@/src/components/ui/StatusBadge";
 import PartnerTag from "@/src/components/ui/PartnerTag";
 import RoleChip from "@/src/components/ui/RoleChip";
 import RegionBadge from "@/src/components/ui/RegionBadge";
+import ApproveButton from "@/src/components/employees/ApproveButton";
+import GenerateLetterButton from "@/src/components/employees/GenerateLetterButton";
+import { fmtDateTime } from "@/src/lib/format";
 import {
     CHECK_CATEGORIES,
+    CATEGORY_LABEL,
     type CheckCategory,
     type EmployeeRow,
 } from "@/src/lib/employees";
-import type { CheckStatus } from "@/src/lib/enums";
-
-const CATEGORY_LABEL: Record<CheckCategory, string> = {
-    CRIMINAL: "Criminal",
-    EDUCATION: "Education",
-    EMPLOYMENT: "Employment",
-    DRUG: "Drug Test",
-    CREDIT: "Credit",
-    SSN: "SSN/Addr",
-    OTHER: "Other",
-};
+import type { CheckStatus, UserRole } from "@/src/lib/enums";
 
 // Map a CheckStatus to a mini-badge {cls, label} for the per-category columns.
 function miniBadge(status: CheckStatus | null, fallbackLabel: string | null) {
@@ -31,7 +25,13 @@ function miniBadge(status: CheckStatus | null, fallbackLabel: string | null) {
     return { cls: "status-pending", label: fallbackLabel ?? "Pend" };
 }
 
-export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
+export default function EmployeeTable({
+    rows,
+    viewerRole,
+}: {
+    rows: EmployeeRow[];
+    viewerRole: UserRole;
+}) {
     return (
         <div className="table-card">
             <div className="table-scroll">
@@ -124,33 +124,47 @@ export default function EmployeeTable({ rows }: { rows: EmployeeRow[] }) {
                                     </td>
                                     <td>
                                         {r.letterIssuedDate
-                                            ? new Date(r.letterIssuedDate).toLocaleDateString(
-                                                    "en-US",
-                                                    { month: "short", day: "2-digit" }
-                                                )
+                                            ? fmtDateTime(r.letterIssuedDate)
                                             : "—"}
                                     </td>
                                     <td>
-                                        {r.approvedByName ?? (
+                                        {r.approvedByName ? (
+                                            <span style={{ fontSize: 12, color: "var(--success)", fontWeight: 600 }}>
+                                                ✓ {r.approvedByName}
+                                            </span>
+                                        ) : viewerRole === "HR_HEAD" && r.status === "GREEN" ? (
+                                            <ApproveButton
+                                                requestId={r.requestId}
+                                                candidateName={r.candidateName}
+                                            />
+                                        ) : (
                                             <span style={{ color: "var(--text-light)" }}>
                                                 Pending
                                             </span>
                                         )}
                                     </td>
                                     <td>
-                                        {canGenerate ? (
-                                            <button
-                                                type="button"
-                                                className="btn btn-sm btn-accent"
-                                                disabled
-                                                title="Letter generation — coming soon"
-                                            >
-                                                Generate
-                                            </button>
+                                        {canGenerate && viewerRole === "HR_HEAD" ? (
+                                            <GenerateLetterButton requestId={r.requestId} />
                                         ) : r.letterIssuedDate ? (
-                                            <span style={{ color: "var(--success)", fontSize: 11 }}>
-                                                Issued
-                                            </span>
+                                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                                <a
+                                                    href={`/api/requests/${r.requestId}/letter`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    style={{ color: "var(--success)", fontSize: 11, fontWeight: 600 }}
+                                                >
+                                                    ✓ Issued (HTML)
+                                                </a>
+                                                {r.hasLetterDocx && (
+                                                    <a
+                                                        href={`/api/requests/${r.requestId}/letter/docx`}
+                                                        style={{ color: "var(--primary)", fontSize: 10 }}
+                                                    >
+                                                        Download .docx
+                                                    </a>
+                                                )}
+                                            </div>
                                         ) : (
                                             <span style={{ color: "var(--text-light)" }}>—</span>
                                         )}

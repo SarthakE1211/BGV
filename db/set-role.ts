@@ -1,16 +1,21 @@
 /**
- * Promote or change a user's role by email.
+ * Provision a user (or change an existing user's role) by email.
  *
  *   npm run db:make-admin -- alice@company.com            # defaults to HR_HEAD
  *   npm run db:set-role   -- alice@company.com HR_HEAD
  *   npm run db:set-role   -- alice@company.com SPECIALIST
  *   npm run db:set-role   -- alice@company.com SDM
  *
- * The user must have signed in at least once so their row (keyed on
- * azure_ad_id) exists. Prints the before/after row to confirm.
+ * Used to bootstrap the first HR Head. Once an HR Head exists they can add
+ * further users from Settings → User Management in the UI.
+ *
+ * If the email does not exist, a new pre-provisioned row is created with
+ * is_active=1 and no azure_ad_id — the Azure fields are backfilled on that
+ * user's first M365 sign-in.
  */
 import { createConnection, type RowDataPacket } from "mysql2/promise";
 import { config as loadEnv } from "dotenv";
+import { randomBytes } from "node:crypto";
 
 loadEnv({ path: ".env.local" });
 loadEnv();
@@ -62,13 +67,22 @@ async function main() {
     );
 
     if (rows.length === 0) {
-        console.error(
-            `\nNo user found with email "${email}".\n` +
-                `Sign in once at http://localhost:3000/auth/signin first so the user\n` +
-                `row is created, then re-run this command.\n`
+        // Pre-provision: HR Head enters an email before the user has ever
+        // signed in. azure_ad_id / image are filled on first Azure AD login.
+        const id = "c" + Date.now().toString(36) + randomBytes(8).toString("hex");
+        const placeholderName = email.split("@")[0];
+        await conn.execute(
+            `INSERT INTO users (id, name, email, role, is_active)
+             VALUES (?, ?, ?, ?, 1)`,
+            [id, placeholderName, email, requestedRole]
+        );
+        console.log(
+            `\nCreated: ${placeholderName} <${email}> — role=${requestedRole}, active=yes ✓\n` +
+                `They can now sign in at http://localhost:3000/auth/signin with their\n` +
+                `Microsoft 365 account. Name/photo will auto-populate on first login.\n`
         );
         await conn.end();
-        process.exit(2);
+        return;
     }
 
     const current = rows[0];

@@ -75,6 +75,10 @@ function buildWhere(
     if (role === "SDM") {
         conds.push("r.submitted_by_id = ?");
         params.push(userId);
+    } else if (role === "SPECIALIST") {
+        // Specialists only see requests assigned to them.
+        conds.push("r.assigned_specialist_id = ?");
+        params.push(userId);
     } else if (f.sdm) {
         conds.push("r.submitted_by_id = ?");
         params.push(f.sdm);
@@ -179,7 +183,7 @@ export async function listRequests(
                 c.email AS candidate_email,
                 p.name  AS partner_name,
                 p.code  AS partner_code,
-                pc.client_name AS client_name,
+                COALESCE(r.client_account, pc.client_name) AS client_name,
                 u.name  AS submitted_by_name,
                 (SELECT COUNT(*) FROM bgv_checks WHERE bgv_request_id = r.id)                    AS checks_total,
                 (SELECT COUNT(*) FROM bgv_checks WHERE bgv_request_id = r.id AND status='CLEARED') AS checks_cleared
@@ -227,7 +231,9 @@ export async function getTabCounts(
     const scope =
         role === "SDM"
             ? { sql: "WHERE submitted_by_id = ?", params: [userId] as unknown[] }
-            : { sql: "", params: [] as unknown[] };
+            : role === "SPECIALIST"
+              ? { sql: "WHERE assigned_specialist_id = ?", params: [userId] as unknown[] }
+              : { sql: "", params: [] as unknown[] };
 
     const row = await queryOne<{
         all: number;

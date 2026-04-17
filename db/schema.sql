@@ -5,6 +5,8 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS `app_templates`;
+DROP TABLE IF EXISTS `app_settings`;
 DROP TABLE IF EXISTS `email_logs`;
 DROP TABLE IF EXISTS `activity_logs`;
 DROP TABLE IF EXISTS `blacklist_entries`;
@@ -96,8 +98,10 @@ CREATE TABLE `bgv_requests` (
   `candidate_id`        VARCHAR(30)  NOT NULL,
   `partner_id`          VARCHAR(30)  NOT NULL,
   `partner_client_id`   VARCHAR(30)  NULL,
+  `client_account`      VARCHAR(191) NULL,
   `submitted_by_id`     VARCHAR(30)  NOT NULL,
   `approved_by_id`      VARCHAR(30)  NULL,
+  `assigned_specialist_id` VARCHAR(30) NULL,
   `role_type`           ENUM('FTE_W2','PRO','DISPATCH','BACKFILL') NOT NULL,
   `region`              ENUM('USA','CANADA','LATAM') NOT NULL DEFAULT 'USA',
   `bgv_vendor`          ENUM('DISA','PRECISEHIRE') NOT NULL DEFAULT 'DISA',
@@ -109,6 +113,9 @@ CREATE TABLE `bgv_requests` (
   `initiation_date`     DATETIME(3)  NULL,
   `completion_date`     DATETIME(3)  NULL,
   `letter_issued_date`  DATETIME(3)  NULL,
+  `letter_html`         LONGTEXT     NULL,
+  `letter_blob_url`     VARCHAR(512) NULL,
+  `letter_docx`         LONGBLOB     NULL,
   `disa_cost`           DECIMAL(10,2) NULL,
   `notes`               TEXT         NULL,
   `created_at`          DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -119,6 +126,7 @@ CREATE TABLE `bgv_requests` (
   KEY `ix_bgv_requests_partner_id`  (`partner_id`),
   KEY `ix_bgv_requests_created_at`  (`created_at`),
   KEY `ix_bgv_requests_candidate`   (`candidate_id`),
+  KEY `ix_bgv_requests_assigned`    (`assigned_specialist_id`),
   CONSTRAINT `fk_bgv_requests_candidate`
     FOREIGN KEY (`candidate_id`) REFERENCES `candidates`(`id`),
   CONSTRAINT `fk_bgv_requests_partner`
@@ -128,7 +136,9 @@ CREATE TABLE `bgv_requests` (
   CONSTRAINT `fk_bgv_requests_submitted_by`
     FOREIGN KEY (`submitted_by_id`) REFERENCES `users`(`id`),
   CONSTRAINT `fk_bgv_requests_approved_by`
-    FOREIGN KEY (`approved_by_id`) REFERENCES `users`(`id`)
+    FOREIGN KEY (`approved_by_id`) REFERENCES `users`(`id`),
+  CONSTRAINT `fk_bgv_requests_assigned_specialist`
+    FOREIGN KEY (`assigned_specialist_id`) REFERENCES `users`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── INDIVIDUAL BGV CHECKS ─────────────────────────────────────────────────────
@@ -202,4 +212,29 @@ CREATE TABLE `email_logs` (
   KEY `ix_email_logs_request` (`bgv_request_id`),
   CONSTRAINT `fk_email_logs_request`
     FOREIGN KEY (`bgv_request_id`) REFERENCES `bgv_requests`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── APP TEMPLATES (uploaded .docx templates for letters etc.) ────────────────
+CREATE TABLE `app_templates` (
+  `key`            VARCHAR(32)  NOT NULL,
+  `filename`       VARCHAR(255) NOT NULL,
+  `mime_type`      VARCHAR(128) NOT NULL,
+  `bytes`          LONGBLOB     NOT NULL,
+  `size_bytes`     INT          NOT NULL,
+  `uploaded_at`    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `uploaded_by_id` VARCHAR(30)  NULL,
+  PRIMARY KEY (`key`),
+  CONSTRAINT `fk_app_templates_user`
+    FOREIGN KEY (`uploaded_by_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── APP SETTINGS (toggle flags, feature switches) ─────────────────────────────
+CREATE TABLE `app_settings` (
+  `key`           VARCHAR(64)  NOT NULL,
+  `value`         VARCHAR(255) NOT NULL,
+  `updated_at`    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `updated_by_id` VARCHAR(30)  NULL,
+  PRIMARY KEY (`key`),
+  CONSTRAINT `fk_app_settings_user`
+    FOREIGN KEY (`updated_by_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

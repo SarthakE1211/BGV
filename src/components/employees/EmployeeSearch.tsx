@@ -40,12 +40,12 @@ export default function EmployeeSearch() {
                 value={val}
                 onChange={(e) => onChange(e.target.value)}
             />
-            <button
+            {/* <button
                 className="btn btn-outline"
                 onClick={() => alert("Export to Excel — coming soon")}
             >
                 Export to Excel
-            </button>
+            </button> */}
         </div>
     );
 }

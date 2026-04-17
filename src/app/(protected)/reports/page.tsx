@@ -10,6 +10,8 @@ import {
     OVERDUE_DAYS,
 } from "@/src/lib/report";
 import PartnerTag from "@/src/components/ui/PartnerTag";
+import ReportActions from "@/src/components/reports/ReportActions";
+import { fmtDateTime } from "@/src/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +34,12 @@ const TODAY_LABEL = new Date().toLocaleDateString("en-US", {
 });
 
 export default async function ReportsPage() {
-    await requireAuth("SPECIALIST");
+    const user = await requireAuth();
     const [summary, partners, overdue, emails] = await Promise.all([
-        getDailySummary(),
-        getPartnerProgress(),
-        getOverdueChecks(),
-        getTodayEmailLog(),
+        getDailySummary(user.role, user.id),
+        getPartnerProgress(user.role, user.id),
+        getOverdueChecks(user.role, user.id),
+        getTodayEmailLog(user.role, user.id),
     ]);
 
     const maxActive = Math.max(1, ...partners.map((p) => p.active));
@@ -58,18 +60,14 @@ export default async function ReportsPage() {
                 <div>
                     <h3 style={{ fontSize: 15 }}>Daily BGV Status Report</h3>
                     <p style={{ fontSize: 12, color: "var(--text-light)", marginTop: 2 }}>
-                        Auto-generated daily at 6:00 PM IST. Emailed to all SDMs, BGV
-                        Specialists, and HR Head.
+                        {user.role === "HR_HEAD"
+                            ? "Auto-generated daily at 6:00 PM IST. Emailed to all SDMs, BGV Specialists, and HR Head."
+                            : user.role === "SDM"
+                              ? "Your personal BGV activity — scoped to requests you have submitted."
+                              : "Your assigned BGV workload — scoped to requests assigned to you."}
                     </p>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                    <button type="button" className="btn btn-outline btn-sm" disabled>
-                        Preview Email
-                    </button>
-                    <button type="button" className="btn btn-primary btn-sm" disabled>
-                        Send Now
-                    </button>
-                </div>
+                <ReportActions role={user.role} />
             </div>
 
             {/* Summary card */}
@@ -289,10 +287,7 @@ export default async function ReportsPage() {
                             {emails.map((e) => (
                                 <tr key={e.id}>
                                     <td style={{ color: "var(--text-light)" }}>
-                                        {new Date(e.sentAt).toLocaleTimeString("en-US", {
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                        })}
+                                        {fmtDateTime(e.sentAt)}
                                     </td>
                                     <td>{e.triggerType}</td>
                                     <td>{e.recipientEmail}</td>

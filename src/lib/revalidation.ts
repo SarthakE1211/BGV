@@ -8,6 +8,7 @@ export function invalidateRequest(requestId: string): void {
     revalidatePath("/requests");
     revalidatePath(`/requests/${requestId}`);
     revalidatePath("/dashboard");
+    revalidatePath("/database");
 }
 
 export function invalidateCheck(requestId: string): void {

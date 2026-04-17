@@ -20,7 +20,6 @@ export function meetsRole(userRole: UserRole, required: UserRole): boolean {
 export const ROUTE_ROLE_GUARDS: ReadonlyArray<{ prefix: string; minRole: UserRole }> = [
     { prefix: "/partners", minRole: UserRole.HR_HEAD },
     { prefix: "/settings", minRole: UserRole.HR_HEAD },
-    { prefix: "/reports", minRole: UserRole.SPECIALIST },
     { prefix: "/blacklist", minRole: UserRole.SPECIALIST },
     { prefix: "/tracker", minRole: UserRole.SPECIALIST },
 ];

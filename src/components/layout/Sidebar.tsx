@@ -67,7 +67,7 @@ const SECTIONS: NavSection[] = [
             {
                 label: "Daily Report",
                 href: "/reports",
-                roles: [UserRole.SPECIALIST, UserRole.HR_HEAD],
+                roles: [UserRole.SDM, UserRole.SPECIALIST, UserRole.HR_HEAD],
                 icon: <IconReports />,
             },
         ],
@@ -80,6 +80,12 @@ const SECTIONS: NavSection[] = [
                 href: "/partners",
                 roles: [UserRole.HR_HEAD],
                 icon: <IconPartners />,
+            },
+            {
+                label: "User Management",
+                href: "/settings/users",
+                roles: [UserRole.HR_HEAD],
+                icon: <IconUsers />,
             },
             {
                 label: "Settings",
@@ -111,8 +117,12 @@ export default function Sidebar({
     const [signingOut, setSigningOut] = useState(false);
     const [showSignOutModal, setShowSignOutModal] = useState(false);
 
-    const isActive = (href: string) =>
-        href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
+    // Exact-match for dashboard and /settings (so /settings/users doesn't also
+    // highlight the Settings row); prefix-match for everything else.
+    const isActive = (href: string) => {
+        if (href === "/dashboard" || href === "/settings") return pathname === href;
+        return pathname === href || pathname.startsWith(href + "/");
+    };
 
     const handleSignOutClick = () => {
         setShowSignOutModal(true);
@@ -120,10 +130,32 @@ export default function Sidebar({
 
     const handleSignOutConfirm = async () => {
         setSigningOut(true);
-        await signOut({
-            callbackUrl:
-                "https://login.microsoftonline.com/common/oauth2/v2.0/logout?post_logout_redirect_uri=http://localhost:3000",
-        });
+        // Full sign-out in two parts:
+        //   1. Clear NextAuth session cookies (our side)
+        //   2. Fire Microsoft's logout endpoint in a hidden iframe to kill the
+        //      Azure AD session silently. A top-level redirect to the logout
+        //      endpoint would strand the user on Microsoft's "You signed out"
+        //      page; the iframe avoids that while still clearing the cookie.
+        // Then we navigate our app to /auth/signin ourselves.
+        await signOut({ redirect: false });
+
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = "https://login.microsoftonline.com/common/oauth2/v2.0/logout";
+
+        let done = false;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            try { document.body.removeChild(iframe); } catch { /* noop */ }
+            window.location.href = "/auth/signin";
+        };
+
+        iframe.onload = finish;
+        // Fallback in case onload doesn't fire (blocked cross-origin frame, etc.)
+        setTimeout(finish, 1500);
+
+        document.body.appendChild(iframe);
     };
 
     const handleSignOutCancel = () => {
@@ -414,6 +446,16 @@ function IconReports() {
     );
 }
 function IconPartners() {
+    return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 00-3-3.87" />
+            <path d="M16 3.13a4 4 0 010 7.75" />
+        </svg>
+    );
+}
+function IconUsers() {
     return (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />

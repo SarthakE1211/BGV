@@ -10,6 +10,7 @@ import { findBlacklistMatch, type BlacklistMatch } from "@/src/lib/blacklist";
 import { AppError } from "@/src/lib/errors";
 import type { AuthedUser } from "@/src/lib/auth.helpers";
 import type { Region, Priority, RoleType } from "@/src/lib/enums";
+import { getSetting } from "@/src/lib/settings";
 
 export interface CreateRequestInput {
     candidateName: string;
@@ -18,10 +19,12 @@ export interface CreateRequestInput {
     candidateDob?: string | null; // yyyy-mm-dd
     partnerId: string;
     partnerClientId?: string | null;
+    clientAccount?: string | null;
     roleType: RoleType;
     region: Region;
     priority: Priority;
     notes?: string | null;
+    assignedSpecialistId?: string | null;
 }
 
 export interface CreateRequestResult {
@@ -61,6 +64,19 @@ export async function createRequest(
 
     const bgvVendor = input.region === "CANADA" ? "PRECISEHIRE" : "DISA";
 
+    // Respect the /settings Vendor Configuration toggles. Turning a vendor
+    // off should prevent new requests from routing to it — existing in-flight
+    // requests are unaffected.
+    const vendorKey = bgvVendor === "PRECISEHIRE" ? "vendor.precisehire" : "vendor.disa";
+    const vendorEnabled = await getSetting(vendorKey).catch(() => true);
+    if (!vendorEnabled) {
+        throw new AppError(
+            "VALIDATION",
+            `${bgvVendor} is currently disabled in Settings. Re-enable it or change the region before submitting.`,
+            { field: "region" }
+        );
+    }
+
     return tx(async (conn) => {
         // 1. Candidate upsert (look up by email; create if absent).
         const [existingRows] = await conn.execute<(RowDataPacket & { id: string })[]>(
@@ -95,19 +111,22 @@ export async function createRequest(
 
         // 3. Request row.
         const requestId = cuid();
+        const assignedSpecialistId = input.assignedSpecialistId?.trim() || null;
         await conn.execute(
             `INSERT INTO bgv_requests
                  (id, request_number, candidate_id, partner_id, partner_client_id,
-                  submitted_by_id, role_type, region, bgv_vendor, status, priority,
-                  bgv_type, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
+                  client_account, submitted_by_id, assigned_specialist_id, role_type,
+                  region, bgv_vendor, status, priority, bgv_type, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?)`,
             [
                 requestId,
                 reqNum,
                 candidateId,
                 input.partnerId,
                 partnerClientId,
+                input.clientAccount || null,
                 actor.id,
+                assignedSpecialistId,
                 input.roleType,
                 input.region,
                 bgvVendor,
@@ -117,13 +136,14 @@ export async function createRequest(
             ]
         );
 
-        // 4. One bgv_checks row per resolved check type.
+        // 4. One bgv_checks row per resolved check type. Pre-assign to the
+        // request's specialist (if any) so Tracker view ownership matches.
         for (const c of checks) {
             await conn.execute(
                 `INSERT INTO bgv_checks
-                     (id, bgv_request_id, check_type, requirement_source, status)
-                 VALUES (?, ?, ?, ?, 'PENDING')`,
-                [cuid(), requestId, c.checkType, c.source]
+                     (id, bgv_request_id, assigned_to_id, check_type, requirement_source, status)
+                 VALUES (?, ?, ?, ?, ?, 'PENDING')`,
+                [cuid(), requestId, assignedSpecialistId, c.checkType, c.source]
             );
         }
 

@@ -28,7 +28,12 @@ function makePool(): Pool {
         connectionLimit: 10,
         waitForConnections: true,
         dateStrings: false,
-        timezone: "Z",
+        // MySQL server NOW() returns local IST wall-clock and stores the
+        // string in DATETIME as-is (no tz info). Tell the driver that DATETIME
+        // values are in +05:30 so it constructs JS Date objects pointing to
+        // the correct UTC moment — the UI formatter then converts back to
+        // IST and the wall-clock round-trip lines up.
+        timezone: "+05:30",
         namedPlaceholders: false,
         decimalNumbers: true,
     });

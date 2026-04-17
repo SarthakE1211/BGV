@@ -11,12 +11,59 @@ function SignInContent() {
     const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard";
     const error = searchParams.get("error");
 
-    const errorMessages: Record<string, string> = {
-        AccessDenied: "Your account does not have access to the BGV Portal.",
-        AccountDisabled: "Your account has been deactivated. Contact HR.",
-        Configuration: "A server configuration error occurred.",
-        Default: "An authentication error occurred. Please try again.",
+    // Error codes fall into three buckets:
+    //   1. App-level rejections (AccountDisabled, MissingEmail) — from our signIn callback
+    //   2. Azure tenant rejections (OAuthCallback, OAuthSignin, AccessDenied) — Microsoft
+    //      refused before reaching our callback. Most common cause: user isn't a member
+    //      or guest of the OvationWPS tenant (AADSTS90072).
+    //   3. Everything else (Configuration, Default) — generic fallback
+    const errorMessages: Record<string, { title: string; body: string; hint?: string }> = {
+        AccessDenied: {
+            title: "Access denied",
+            body: "Your Microsoft account was rejected by the OvationWPS organization.",
+            hint: "This usually means your account isn't a member or guest of the OvationWPS tenant. Contact your HR Head to be invited.",
+        },
+        OAuthCallback: {
+            title: "Microsoft sign-in failed",
+            body: "Microsoft couldn't complete the sign-in.",
+            hint: "If you saw an error like “AADSTS90072” on the Microsoft page, your account isn't part of the OvationWPS organization yet. Ask your HR Head to invite you as a guest user.",
+        },
+        OAuthSignin: {
+            title: "Microsoft sign-in failed",
+            body: "We couldn't start the Microsoft sign-in flow.",
+            hint: "Try again. If the problem persists, contact IT.",
+        },
+        Callback: {
+            title: "Sign-in callback failed",
+            body: "Something went wrong while finishing the sign-in.",
+            hint: "Close this tab and try again. If the error repeats, contact IT.",
+        },
+        AccountDisabled: {
+            title: "Account deactivated",
+            body: "Your account has been deactivated. Contact your HR Head to regain access.",
+        },
+        SsoDisabled: {
+            title: "Sign-in temporarily disabled",
+            body: "The HR Head has temporarily disabled Microsoft 365 sign-in for non-admin users.",
+            hint: "Please try again later, or contact your HR Head if this is urgent.",
+        },
+        MissingEmail: {
+            title: "Missing email",
+            body: "We couldn't read an email address from your Microsoft account.",
+            hint: "Contact IT — your Microsoft profile may be missing an email attribute.",
+        },
+        Configuration: {
+            title: "Server configuration error",
+            body: "A server configuration error occurred.",
+            hint: "Contact IT with the current timestamp.",
+        },
+        Default: {
+            title: "Authentication error",
+            body: "An authentication error occurred. Please try again.",
+        },
     };
+
+    const currentError = error ? errorMessages[error] ?? errorMessages.Default : null;
 
     const handleMicrosoftLogin = async () => {
         try {
@@ -124,9 +171,35 @@ function SignInContent() {
                     </p>
 
                     {/* Error Banner */}
-                    {error && (
-                        <div className="w-full bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 text-center">
-                            {errorMessages[error] ?? errorMessages.Default}
+                    {currentError && (
+                        <div className="w-full bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-left">
+                            <div className="flex items-start gap-2">
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    viewBox="0 0 20 20"
+                                    fill="currentColor"
+                                    className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5"
+                                >
+                                    <path
+                                        fillRule="evenodd"
+                                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z"
+                                        clipRule="evenodd"
+                                    />
+                                </svg>
+                                <div className="flex-1">
+                                    <div className="text-sm font-semibold text-red-800">
+                                        {currentError.title}
+                                    </div>
+                                    <div className="text-sm text-red-700 mt-0.5">
+                                        {currentError.body}
+                                    </div>
+                                    {currentError.hint && (
+                                        <div className="text-xs text-red-600 mt-2 leading-relaxed">
+                                            {currentError.hint}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -152,6 +225,34 @@ function SignInContent() {
                     <p className="text-xs text-gray-400 text-center -mt-2">
                         Use your company Microsoft 365 account
                     </p>
+
+                    {/* ── Trouble signing in? — always visible help section ─────── */}
+                    <details className="w-full mt-2 text-left">
+                        <summary className="text-sm text-gray-600 hover:text-gray-800 cursor-pointer select-none font-medium">
+                            Trouble signing in?
+                        </summary>
+                        <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs text-gray-700 space-y-2 leading-relaxed">
+                            <p>
+                                <strong>Who can sign in:</strong> Only users whose email has
+                                been pre-registered by the HR Head, AND whose Microsoft
+                                account is a member or guest of the OvationWPS tenant.
+                            </p>
+                            <p>
+                                <strong>Seeing “AADSTS90072” on the Microsoft page?</strong>{" "}
+                                Your Microsoft account isn't part of the OvationWPS
+                                organization. Contact your HR Head — they'll invite you as a
+                                guest and you'll receive an email from Microsoft to accept.
+                            </p>
+                            <p>
+                                <strong>Seeing “Access Pending”?</strong> Your email isn't in
+                                our system yet. Ask your HR Head to provision your account.
+                            </p>
+                            <p className="pt-1 border-t border-gray-200 mt-2">
+                                Still stuck? Contact IT with the error code and the time of
+                                the failed sign-in attempt.
+                            </p>
+                        </div>
+                    </details>
                 </div>
             </main>
         </div>

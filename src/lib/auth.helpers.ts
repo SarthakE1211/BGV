@@ -43,7 +43,7 @@ export async function requireAuth(minRole?: UserRole): Promise<AuthedUser> {
     const row = await loadAuthedUser(session.user.id);
 
     if (!row || !row.is_active) {
-        redirect("/auth/error?error=AccountDisabled");
+        redirect("/auth/signin?error=AccountDisabled");
     }
 
     if (minRole && ROLE_HIERARCHY[row.role] < ROLE_HIERARCHY[minRole]) {

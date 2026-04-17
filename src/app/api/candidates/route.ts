@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const VALID_TABS: EmployeeTab[] = ["all", "green", "amber", "red", "blacklisted"];
 
 export async function GET(req: Request) {
-    await requireAuth();
+    const user = await requireAuth();
     const sp = new URL(req.url).searchParams;
 
     const tabParam = sp.get("tab");
@@ -25,7 +25,9 @@ export async function GET(req: Request) {
 
     const { rows, total } = await listEmployees(
         { q: sp.get("q"), tab },
-        page
+        page,
+        user.role,
+        user.id
     );
 
     return NextResponse.json({

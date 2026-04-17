@@ -71,7 +71,10 @@ interface BuiltWhere {
 }
 
 function buildWhere(f: TrackerFilters): BuiltWhere {
-    const conds: string[] = [];
+    // Tracker only surfaces checks whose parent request has been *initiated*
+    // (status ≠ PENDING). PENDING requests are driven from the Requests page;
+    // they enter the tracker once a Specialist/HR Head clicks Initiate.
+    const conds: string[] = ["r.status <> 'PENDING'"];
     const params: unknown[] = [];
 
     switch (f.tab) {
@@ -160,7 +163,7 @@ export async function listChecks(
                 c.email AS candidate_email,
                 p.code  AS partner_code,
                 p.name  AS partner_name,
-                pc.client_name AS client_name,
+                COALESCE(r.client_account, pc.client_name) AS client_name,
                 ch.check_type,
                 ch.requirement_source,
                 u.name AS assigned_to_name,
@@ -222,21 +225,23 @@ export async function getCheckTabCounts(): Promise<CheckTabCounts> {
     }>(
         `SELECT
             COUNT(*) AS \`all\`,
-            COALESCE(SUM(UPPER(check_type) LIKE '%CRIMINAL%'),   0) AS criminal,
-            COALESCE(SUM(UPPER(check_type) LIKE '%EDUCATION%'),  0) AS education,
-            COALESCE(SUM(UPPER(check_type) LIKE '%EMPLOYMENT%'), 0) AS employment,
-            COALESCE(SUM(UPPER(check_type) LIKE '%DRUG%'),       0) AS drug,
-            COALESCE(SUM(UPPER(check_type) LIKE '%SSN%'),        0) AS ssn,
-            COALESCE(SUM(UPPER(check_type) LIKE '%CREDIT%'),     0) AS credit,
+            COALESCE(SUM(UPPER(ch.check_type) LIKE '%CRIMINAL%'),   0) AS criminal,
+            COALESCE(SUM(UPPER(ch.check_type) LIKE '%EDUCATION%'),  0) AS education,
+            COALESCE(SUM(UPPER(ch.check_type) LIKE '%EMPLOYMENT%'), 0) AS employment,
+            COALESCE(SUM(UPPER(ch.check_type) LIKE '%DRUG%'),       0) AS drug,
+            COALESCE(SUM(UPPER(ch.check_type) LIKE '%SSN%'),        0) AS ssn,
+            COALESCE(SUM(UPPER(ch.check_type) LIKE '%CREDIT%'),     0) AS credit,
             COALESCE(SUM(
-                UPPER(check_type) NOT LIKE '%CRIMINAL%'   AND
-                UPPER(check_type) NOT LIKE '%EDUCATION%'  AND
-                UPPER(check_type) NOT LIKE '%EMPLOYMENT%' AND
-                UPPER(check_type) NOT LIKE '%DRUG%'       AND
-                UPPER(check_type) NOT LIKE '%SSN%'        AND
-                UPPER(check_type) NOT LIKE '%CREDIT%'
+                UPPER(ch.check_type) NOT LIKE '%CRIMINAL%'   AND
+                UPPER(ch.check_type) NOT LIKE '%EDUCATION%'  AND
+                UPPER(ch.check_type) NOT LIKE '%EMPLOYMENT%' AND
+                UPPER(ch.check_type) NOT LIKE '%DRUG%'       AND
+                UPPER(ch.check_type) NOT LIKE '%SSN%'        AND
+                UPPER(ch.check_type) NOT LIKE '%CREDIT%'
             ), 0) AS specialized
-         FROM bgv_checks`
+         FROM bgv_checks ch
+         JOIN bgv_requests r ON r.id = ch.bgv_request_id
+         WHERE r.status <> 'PENDING'`
     );
     return {
         all: Number(row?.all ?? 0),

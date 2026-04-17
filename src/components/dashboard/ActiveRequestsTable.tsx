@@ -8,13 +8,16 @@ import PartnerTag from "@/src/components/ui/PartnerTag";
 import RoleChip from "@/src/components/ui/RoleChip";
 import RegionBadge from "@/src/components/ui/RegionBadge";
 import VendorTag from "@/src/components/ui/VendorTag";
+import BGVDetailModal from "@/src/components/dashboard/BGVDetailModal";
+import { fmtDateTime } from "@/src/lib/format";
 import type { ActiveRequestRow } from "@/src/lib/dashboard";
-import type { BGVStatus, BGVVendor } from "@/src/lib/enums";
+import type { BGVStatus, BGVVendor, UserRole } from "@/src/lib/enums";
 
-export default function ActiveRequestsTable({ rows }: { rows: ActiveRequestRow[] }) {
+export default function ActiveRequestsTable({ rows, viewerRole }: { rows: ActiveRequestRow[]; viewerRole: UserRole }) {
     const [partner, setPartner] = useState<string>("");
     const [status, setStatus] = useState<string>("");
     const [vendor, setVendor] = useState<string>("");
+    const [selectedId, setSelectedId] = useState<string | null>(null);
 
     const partners = useMemo(() => {
         const seen = new Map<string, string>();
@@ -36,6 +39,8 @@ export default function ActiveRequestsTable({ rows }: { rows: ActiveRequestRow[]
     );
 
     return (
+        <>
+        <BGVDetailModal requestId={selectedId} onClose={() => setSelectedId(null)} viewerRole={viewerRole} />
         <div className="table-card">
             <div className="table-header">
                 <h3>Recent BGV Activity</h3>
@@ -141,17 +146,30 @@ export default function ActiveRequestsTable({ rows }: { rows: ActiveRequestRow[]
                                     <StatusBadge status={r.status} />
                                 </td>
                                 <td>
-                                    {r.initiationDate
-                                        ? new Date(r.initiationDate).toLocaleDateString("en-US", {
-                                                month: "short",
-                                                day: "2-digit",
-                                            })
-                                        : "—"}
+                                    {(() => {
+                                        const d = r.initiationDate ?? r.createdAt;
+                                        const label = fmtDateTime(d);
+                                        // When the BGV hasn't been initiated yet, the date
+                                        // shown is the submission date — indicate that softly.
+                                        return r.initiationDate ? (
+                                            label
+                                        ) : (
+                                            <span
+                                                style={{ color: "var(--text-light)" }}
+                                                title="Submitted — not yet initiated"
+                                            >
+                                                {label}
+                                            </span>
+                                        );
+                                    })()}
                                 </td>
                                 <td>
-                                    <Link href={`/requests/${r.id}`} className="btn btn-sm btn-outline">
+                                    <button
+                                        className="btn btn-sm btn-outline"
+                                        onClick={() => setSelectedId(r.id)}
+                                    >
                                         View
-                                    </Link>
+                                    </button>
                                 </td>
                             </tr>
                         ))}
@@ -159,5 +177,6 @@ export default function ActiveRequestsTable({ rows }: { rows: ActiveRequestRow[]
                 </table>
             </div>
         </div>
+        </>
     );
 }

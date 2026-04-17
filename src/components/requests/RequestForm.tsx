@@ -1,14 +1,6 @@
 // src/components/requests/RequestForm.tsx
 "use client";
 
-// New BGV Request form — three live API calls fire as the user fills it:
-//   1. partner change → GET /api/partners/[id]/clients
-//   2. region change  → pure JS, updates vendor display + Canada warning
-//   3. partner+client+region change → POST /api/checks-matrix
-//
-// Submit hits the createBGVRequest server action, which runs the 5-step flow
-// (blacklist gate → candidate upsert → request insert → checks insert → log).
-
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PhoneInput } from "react-international-phone";
@@ -21,23 +13,27 @@ import {
 import type { PartnerOption } from "@/src/lib/partners";
 import type { Region, RoleType, Priority } from "@/src/lib/enums";
 
-// Map the form's region enum to the library's ISO-2 country code. Used as
-// the initial country in the phone picker — the user can change it from the
-// flag dropdown afterwards.
 const REGION_DEFAULT_COUNTRY: Record<Region, string> = {
     USA: "us",
     CANADA: "ca",
     LATAM: "mx",
 };
 
+// Client account options per partner code. "Other..." triggers a free-text input.
+const CLIENT_OPTIONS: Record<string, string[]> = {
+    HCL: ["Standard (MSA Default)", "Akzonobel", "Arizona Public Service", "Ascension", "Barclays", "BD", "BMS", "GSK", "Merck", "NVIDIA", "Pfizer", "Tenet Healthcare", "USRS", "Other..."],
+    COG: ["Standard", "Fortrea", "ServiceNow", "JLL", "McCormick", "HAYS", "CNO", "J&J", "T&R", "Merchant Fleet", "Other..."],
+    LTM: ["Standard", "Eversource", "Bird Electric", "Other..."],
+    TCS: ["Standard", "Hertz", "Other..."],
+    WIP: ["Standard", "Other..."],
+    HEX: ["Standard", "Other..."],
+    BIR: ["Standard", "Other..."],
+    MIN: ["Standard", "Other..."],
+};
+
 interface ResolvedCheckUI {
     checkType: string;
     source: string;
-}
-
-interface ClientOpt {
-    id: string;
-    clientName: string;
 }
 
 interface FormState {
@@ -46,11 +42,12 @@ interface FormState {
     candidatePhone: string;
     candidateDob: string;
     partnerId: string;
-    partnerClientId: string;
+    clientAccount: string;
     roleType: RoleType;
     region: Region;
     priority: Priority;
     notes: string;
+    assignedSpecialistId: string;
 }
 
 const EMPTY: FormState = {
@@ -59,30 +56,33 @@ const EMPTY: FormState = {
     candidatePhone: "",
     candidateDob: "",
     partnerId: "",
-    partnerClientId: "",
+    clientAccount: "",
     roleType: "FTE_W2",
     region: "USA",
     priority: "NORMAL",
     notes: "",
+    assignedSpecialistId: "",
 };
 
-export default function RequestForm({ partners }: { partners: PartnerOption[] }) {
+export default function RequestForm({ partners, onClose, inModal }: { partners: PartnerOption[]; onClose?: () => void; inModal?: boolean }) {
     const router = useRouter();
     const [form, setForm] = useState<FormState>(EMPTY);
-    const [clients, setClients] = useState<ClientOpt[]>([]);
-    const [clientsLoading, setClientsLoading] = useState(false);
+    const [clientOther, setClientOther] = useState("");
     const [checks, setChecks] = useState<ResolvedCheckUI[]>([]);
     const [checksLoading, setChecksLoading] = useState(false);
+    const [specialists, setSpecialists] = useState<Array<{ id: string; name: string }>>([]);
     const [submitError, setSubmitError] = useState<string | null>(null);
     const [blacklistMatch, setBlacklistMatch] =
-        useState<Extract<CreateBGVRequestResult, { error: "BLACKLISTED" }>["match"] | null>(
-            null
-        );
+        useState<Extract<CreateBGVRequestResult, { error: "BLACKLISTED" }>["match"] | null>(null);
     const [submitting, startSubmit] = useTransition();
 
-    // Pick the initial flag based on whatever region the form boots with,
-    // then leave it to the user. Deliberately not reactive — changing region
-    // mid-form shouldn't wipe a phone the user has already typed.
+    useEffect(() => {
+        fetch("/api/specialists")
+            .then((r) => r.json())
+            .then((d) => setSpecialists(d.specialists ?? []))
+            .catch(console.error);
+    }, []);
+
     const initialPhoneCountry = useMemo(
         () => REGION_DEFAULT_COUNTRY[form.region] ?? "us",
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -92,35 +92,23 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
     const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
         setForm((f) => ({ ...f, [key]: value }));
 
-    // ── 1. Partner change → fetch clients ─────────────────────────────────
+    // Derive current partner code from selected partnerId
+    const partnerCode = useMemo(
+        () => partners.find((p) => p.id === form.partnerId)?.code ?? "",
+        [partners, form.partnerId]
+    );
+
+    const clientOptions = CLIENT_OPTIONS[partnerCode] ?? [];
+    const isOther = form.clientAccount === "Other...";
+
+    // Clear client selection when partner changes
     useEffect(() => {
-        if (!form.partnerId) {
-            setClients([]);
-            set("partnerClientId", "");
-            return;
-        }
-        const ctrl = new AbortController();
-        setClientsLoading(true);
-        fetch(`/api/partners/${encodeURIComponent(form.partnerId)}/clients`, {
-            signal: ctrl.signal,
-        })
-            .then((r) => r.json())
-            .then((d) => {
-                setClients(d.clients ?? []);
-                // If the previously selected client doesn't belong to the new partner, clear it.
-                if (form.partnerClientId && !d.clients?.some((c: ClientOpt) => c.id === form.partnerClientId)) {
-                    set("partnerClientId", "");
-                }
-            })
-            .catch((e) => {
-                if (e.name !== "AbortError") console.error(e);
-            })
-            .finally(() => setClientsLoading(false));
-        return () => ctrl.abort();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        set("clientAccount", "");
+        setClientOther("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [form.partnerId]);
 
-    // ── 3. Partner + client + region change → resolve check matrix ────────
+    // Checks matrix — re-runs on partner + region change
     const matrixCtrl = useRef<AbortController | null>(null);
     const resolveMatrix = useCallback(async () => {
         if (!form.partnerId) {
@@ -137,7 +125,7 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     partnerId: form.partnerId,
-                    partnerClientId: form.partnerClientId || null,
+                    partnerClientId: null,
                     region: form.region,
                 }),
                 signal: ctrl.signal,
@@ -149,7 +137,7 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
         } finally {
             if (!ctrl.signal.aborted) setChecksLoading(false);
         }
-    }, [form.partnerId, form.partnerClientId, form.region]);
+    }, [form.partnerId, form.region]);
 
     useEffect(() => {
         resolveMatrix();
@@ -161,23 +149,37 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
         setSubmitError(null);
         setBlacklistMatch(null);
 
+        const finalClient = isOther ? clientOther.trim() : form.clientAccount.trim();
+
         const payload: CreateBGVRequestInput = {
             candidateName: form.candidateName.trim(),
             candidateEmail: form.candidateEmail.trim(),
             candidatePhone: form.candidatePhone.trim(),
             candidateDob: form.candidateDob,
             partnerId: form.partnerId,
-            partnerClientId: form.partnerClientId,
+            clientAccount: finalClient,
             roleType: form.roleType,
             region: form.region,
             priority: form.priority,
             notes: form.notes,
+            assignedSpecialistId: form.assignedSpecialistId || undefined,
         };
 
         startSubmit(async () => {
             const res = await createBGVRequest(payload);
             if (res.ok) {
-                router.push(`/requests/${res.requestId}`);
+                if (inModal) {
+                    // Wipe form state so the next open starts fresh.
+                    setForm(EMPTY);
+                    setClientOther("");
+                    setChecks([]);
+                    setSubmitError(null);
+                    setBlacklistMatch(null);
+                    onClose?.();
+                    router.refresh();
+                } else {
+                    router.push(`/requests/${res.requestId}`);
+                }
                 return;
             }
             if (res.error === "BLACKLISTED" && "match" in res) {
@@ -197,7 +199,7 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
         !submitting;
 
     return (
-        <form onSubmit={onSubmit} className="table-card" style={{ padding: 22 }}>
+        <form onSubmit={onSubmit} className={inModal ? "" : "table-card"} style={{ padding: 22 }}>
             <div className="info-box info-blue" style={{ marginBottom: 14 }}>
                 <strong>SDM Submission Form:</strong> Select the partner and client account
                 — the system will auto-load the required checks based on your SOW/MSA configuration.
@@ -259,7 +261,7 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
                 </div>
             </div>
 
-            {/* Partner + Client */}
+            {/* Partner + Client Account */}
             <div className="form-row">
                 <div className="form-group">
                     <label>ITO Partner *</label>
@@ -279,27 +281,40 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
                 <div className="form-group">
                     <label>Client Account / End Client</label>
                     <select
-                        value={form.partnerClientId}
-                        onChange={(e) => set("partnerClientId", e.target.value)}
-                        disabled={!form.partnerId || clientsLoading}
+                        value={form.clientAccount}
+                        onChange={(e) => {
+                            set("clientAccount", e.target.value);
+                            if (e.target.value !== "Other...") setClientOther("");
+                        }}
+                        disabled={!form.partnerId}
                     >
                         <option value="">
-                            {!form.partnerId
-                                ? "Select partner first..."
-                                : clientsLoading
-                                  ? "Loading clients..."
-                                  : clients.length === 0
-                                    ? "No clients configured"
-                                    : "— Direct (no client) —"}
+                            {!form.partnerId ? "Select partner first..." : "— Select client —"}
                         </option>
-                        {clients.map((c) => (
-                            <option key={c.id} value={c.id}>
-                                {c.clientName}
+                        {clientOptions.map((opt) => (
+                            <option key={opt} value={opt}>
+                                {opt}
                             </option>
                         ))}
                     </select>
                 </div>
             </div>
+
+            {/* Free-text input shown only when "Other..." is selected */}
+            {isOther && (
+                <div className="form-row">
+                    <div className="form-group">
+                        <label>Specify Client Name</label>
+                        <input
+                            type="text"
+                            placeholder="Enter client / end-client name..."
+                            value={clientOther}
+                            onChange={(e) => setClientOther(e.target.value)}
+                            autoFocus
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* Role, Priority */}
             <div className="form-row">
@@ -329,6 +344,24 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
                 </div>
             </div>
 
+            {/* Specialist assignment */}
+            <div className="form-row">
+                <div className="form-group">
+                    <label>Assign to BGV Specialist</label>
+                    <select
+                        value={form.assignedSpecialistId}
+                        onChange={(e) => set("assignedSpecialistId", e.target.value)}
+                    >
+                        <option value="">— Unassigned (HR Head will assign) —</option>
+                        {specialists.map((s) => (
+                            <option key={s.id} value={s.id}>
+                                {s.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+
             {/* Vendor display / Canada consent warning */}
             {!isCanada && (
                 <div className="info-box info-green" style={{ marginBottom: 10 }}>
@@ -346,7 +379,7 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
 
             {/* Auto-loaded checks preview */}
             <div className="form-group">
-                <label>Auto-Loaded Checks (based on partner + client + region)</label>
+                <label>Auto-Loaded Checks (based on partner + region)</label>
                 <div
                     style={{
                         padding: 10,
@@ -438,7 +471,7 @@ export default function RequestForm({ partners }: { partners: PartnerOption[] })
                 <button
                     type="button"
                     className="btn btn-outline"
-                    onClick={() => router.back()}
+                    onClick={() => onClose ? onClose() : router.back()}
                     disabled={submitting}
                 >
                     Cancel

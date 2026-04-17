@@ -21,11 +21,11 @@ export default async function ProtectedLayout({
 
     const row = await queryOne<{ n: number }>(
         user.role === "SDM"
-            ? `SELECT COUNT(*) AS n FROM bgv_requests
-               WHERE status IN ('PENDING','IN_PROGRESS') AND submitted_by_id = ?`
-            : `SELECT COUNT(*) AS n FROM bgv_requests
-               WHERE status IN ('PENDING','IN_PROGRESS')`,
-        user.role === "SDM" ? [user.id] : []
+            ? `SELECT COUNT(*) AS n FROM bgv_requests WHERE submitted_by_id = ?`
+            : user.role === "SPECIALIST"
+              ? `SELECT COUNT(*) AS n FROM bgv_requests WHERE assigned_specialist_id = ?`
+              : `SELECT COUNT(*) AS n FROM bgv_requests`,
+        user.role === "HR_HEAD" ? [] : [user.id]
     );
     const pendingCount = Number(row?.n ?? 0);
 

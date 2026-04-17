@@ -9,6 +9,10 @@ import RoleChip from "@/src/components/ui/RoleChip";
 import RegionBadge from "@/src/components/ui/RegionBadge";
 import VendorTag from "@/src/components/ui/VendorTag";
 import CheckActions from "@/src/components/checks/CheckActions";
+import EmailSDMButton from "@/src/components/ui/EmailSDMButton";
+import ReassignSpecialist from "@/src/components/requests/ReassignSpecialist";
+import InitiateButton from "@/src/components/requests/InitiateButton";
+import { fmtDateTime } from "@/src/lib/format";
 import type {
     RequestDetailRow,
     CheckDetailRow,
@@ -35,20 +39,29 @@ export default function RequestDetail({ request, checks, activity, viewerRole }:
     const total = checks.length;
     const canActOnChecks = viewerRole === "SPECIALIST" || viewerRole === "HR_HEAD";
     const canBlacklist = viewerRole === "SPECIALIST" || viewerRole === "HR_HEAD";
+    const canInitiate =
+        request.status === "PENDING" &&
+        (viewerRole === "SPECIALIST" || viewerRole === "HR_HEAD");
 
     return (
         <div className="table-card" style={{ padding: 22 }}>
             {/* Header */}
-            <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 11, color: "var(--text-light)" }}>
-                    {request.requestNumber}
+            <div style={{ marginBottom: 14, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                    <div style={{ fontSize: 11, color: "var(--text-light)" }}>
+                        {request.requestNumber}
+                    </div>
+                    <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
+                        BGV Detail — {request.candidate.name}
+                    </h2>
+                    <div style={{ fontSize: 12, color: "var(--text-light)", marginTop: 2 }}>
+                        {request.candidate.email}
+                        {request.candidate.phone && ` · ${request.candidate.phone}`}
+                    </div>
                 </div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>
-                    BGV Detail — {request.candidate.name}
-                </h2>
-                <div style={{ fontSize: 12, color: "var(--text-light)", marginTop: 2 }}>
-                    {request.candidate.email}
-                    {request.candidate.phone && ` · ${request.candidate.phone}`}
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    {canInitiate && <InitiateButton requestId={request.id} />}
+                    <EmailSDMButton requestId={request.id} />
                 </div>
             </div>
 
@@ -74,12 +87,20 @@ export default function RequestDetail({ request, checks, activity, viewerRole }:
                     <strong>BGV Vendor:</strong> <VendorTag vendor={request.bgvVendor} />
                 </div>
                 <div>
-                    <strong>Submitted:</strong>{" "}
-                    {new Date(request.createdAt).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "2-digit",
-                        year: "numeric",
-                    })}
+                    <strong>Specialist:</strong>{" "}
+                    {viewerRole === "HR_HEAD" ? (
+                        <ReassignSpecialist
+                            requestId={request.id}
+                            currentSpecialistId={request.assignedSpecialist?.id ?? null}
+                        />
+                    ) : (
+                        request.assignedSpecialist?.name ?? (
+                            <span style={{ color: "var(--text-light)" }}>Unassigned</span>
+                        )
+                    )}
+                </div>
+                <div>
+                    <strong>Submitted:</strong> {fmtDateTime(request.createdAt)}
                 </div>
                 <div>
                     <strong>Status:</strong> <StatusBadge status={request.status} />
@@ -138,12 +159,7 @@ export default function RequestDetail({ request, checks, activity, viewerRole }:
                         <StatusBadge status={c.status} />
                         {c.completedAt && (
                             <div className="check-time">
-                                {new Date(c.completedAt).toLocaleString("en-US", {
-                                    month: "short",
-                                    day: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                })}
+                                {fmtDateTime(c.completedAt)}
                             </div>
                         )}
                         {canActOnChecks && (
@@ -179,12 +195,7 @@ export default function RequestDetail({ request, checks, activity, viewerRole }:
                     return (
                         <div key={a.id} className={`timeline-item ${cls}`}>
                             <div className="tl-time">
-                                {new Date(a.createdAt).toLocaleString("en-US", {
-                                    month: "short",
-                                    day: "2-digit",
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                })}{" "}
+                                {fmtDateTime(a.createdAt)}{" "}
                                 — {a.performedBy}
                             </div>
                             <div className="tl-text">

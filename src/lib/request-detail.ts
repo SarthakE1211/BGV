@@ -31,6 +31,7 @@ export interface RequestDetailRow {
     createdAt: Date;
     initiationDate: Date | null;
     completionDate: Date | null;
+    clientAccount: string | null;
     candidate: {
         id: string;
         name: string;
@@ -42,6 +43,7 @@ export interface RequestDetailRow {
     client: { id: string; name: string } | null;
     submittedBy: { id: string; name: string; email: string };
     approvedBy: { id: string; name: string } | null;
+    assignedSpecialist: { id: string; name: string; email: string } | null;
 }
 
 export interface CheckDetailRow {
@@ -86,11 +88,15 @@ interface RequestRowRaw {
     partner_code: string;
     client_id: string | null;
     client_name: string | null;
+    client_account: string | null;
     submitted_by_id: string;
     submitted_by_name: string;
     submitted_by_email: string;
     approved_by_id: string | null;
     approved_by_name: string | null;
+    assigned_specialist_id: string | null;
+    assigned_specialist_name: string | null;
+    assigned_specialist_email: string | null;
 }
 
 /**
@@ -115,19 +121,24 @@ export async function getRequestDetail(
             p.id   AS partner_id,
             p.name AS partner_name,
             p.code AS partner_code,
+            r.client_account,
             pc.id          AS client_id,
             pc.client_name AS client_name,
             sb.id    AS submitted_by_id,
             sb.name  AS submitted_by_name,
             sb.email AS submitted_by_email,
             ab.id   AS approved_by_id,
-            ab.name AS approved_by_name
+            ab.name AS approved_by_name,
+            asp.id    AS assigned_specialist_id,
+            asp.name  AS assigned_specialist_name,
+            asp.email AS assigned_specialist_email
          FROM bgv_requests r
          JOIN candidates c ON c.id = r.candidate_id
          JOIN partners   p ON p.id = r.partner_id
          JOIN users      sb ON sb.id = r.submitted_by_id
          LEFT JOIN partner_clients pc ON pc.id = r.partner_client_id
          LEFT JOIN users           ab ON ab.id = r.approved_by_id
+         LEFT JOIN users           asp ON asp.id = r.assigned_specialist_id
          WHERE r.id = ?
          LIMIT 1`,
         [id]
@@ -135,6 +146,7 @@ export async function getRequestDetail(
     if (!row) return null;
 
     if (role === "SDM" && row.submitted_by_id !== userId) return null;
+    if (role === "SPECIALIST" && row.assigned_specialist_id !== userId) return null;
 
     return {
         id: row.id,
@@ -157,8 +169,9 @@ export async function getRequestDetail(
             isBlacklisted: Boolean(row.candidate_blacklisted),
         },
         partner: { id: row.partner_id, name: row.partner_name, code: row.partner_code },
-        client: row.client_id
-            ? { id: row.client_id, name: row.client_name ?? "" }
+        clientAccount: row.client_account,
+        client: row.client_name || row.client_account
+            ? { id: row.client_id ?? "", name: row.client_name ?? row.client_account ?? "" }
             : null,
         submittedBy: {
             id: row.submitted_by_id,
@@ -167,6 +180,13 @@ export async function getRequestDetail(
         },
         approvedBy: row.approved_by_id
             ? { id: row.approved_by_id, name: row.approved_by_name ?? "" }
+            : null,
+        assignedSpecialist: row.assigned_specialist_id
+            ? {
+                  id: row.assigned_specialist_id,
+                  name: row.assigned_specialist_name ?? "",
+                  email: row.assigned_specialist_email ?? "",
+              }
             : null,
     };
 }

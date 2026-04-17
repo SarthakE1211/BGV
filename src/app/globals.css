@@ -20,7 +20,37 @@
         --text: #1e293b;
         --text-light: #64748b;
         --border: #e2e8f0;
+        /* Surface tokens used where hardcoded "#fff" used to live. In dark
+           mode these become dark-gray so inputs/modals/badges don't stay
+           stark white against the rest of the chrome. */
+        --surface: #ffffff;
+        --surface-muted: #f8fafc;
+        --hover-tint: rgba(26, 54, 93, 0.04);
+        --shadow-modal: rgba(0, 0, 0, 0.3);
         --sidebar-w: 250px;
+        color-scheme: light;
+    }
+
+    /* Dark theme — triggered by <html data-theme="dark">. The ThemeProvider
+       adds this attribute on mount (persisted in localStorage). Sidebar navy
+       stays the same for brand consistency; the rest of the app flips. */
+    [data-theme="dark"] {
+        --primary: #6b8bc4;
+        --primary-light: #8aa6d8;
+        --accent: #fbbf24;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --danger: #f87171;
+        --bg: #0b1220;          /* app backdrop — deepest layer */
+        --card: #151f33;        /* cards, tables, modals — one step up */
+        --text: #f1f5f9;
+        --text-light: #94a3b8;
+        --border: #26334d;
+        --surface: #1b2640;     /* inputs, pagination buttons */
+        --surface-muted: #111a2e;
+        --hover-tint: rgba(255, 255, 255, 0.05);
+        --shadow-modal: rgba(0, 0, 0, 0.7);
+        color-scheme: dark;
     }
 
     *, *::before, *::after {
@@ -265,17 +295,19 @@
         font-size: 11px;
         outline: none;
         font-family: inherit;
-        background: #fff;
+        background: var(--surface);
         color: var(--text);
     }
     .filter-input:focus { border-color: var(--primary); }
     .table-scroll { overflow-x: auto; }
 
-    .table-card table {
+    .table-card table,
+    .setting-group table {
         width: 100%;
         border-collapse: collapse;
     }
-    .table-card thead th {
+    .table-card thead th,
+    .setting-group thead th {
         background: var(--bg);
         padding: 8px 12px;
         text-align: left;
@@ -287,15 +319,18 @@
         border-bottom: 1px solid var(--border);
         white-space: nowrap;
     }
-    .table-card tbody td {
+    .table-card tbody td,
+    .setting-group tbody td {
         padding: 8px 12px;
         font-size: 12px;
         border-bottom: 1px solid var(--border);
         color: var(--text);
         vertical-align: middle;
     }
-    .table-card tbody tr:hover td { background: rgba(26, 54, 93, 0.02); }
-    .table-card tbody tr:last-child td { border-bottom: none; }
+    .table-card tbody tr:hover td,
+    .setting-group tbody tr:hover td { background: var(--hover-tint); }
+    .table-card tbody tr:last-child td,
+    .setting-group tbody tr:last-child td { border-bottom: none; }
 
     /* Status badges */
     .status-badge {
@@ -439,7 +474,7 @@
         font-size: 12px;
         font-family: inherit;
         outline: none;
-        background: #fff;
+        background: var(--surface);
         color: var(--text);
     }
     .form-group input:focus,
@@ -461,7 +496,7 @@
         height: 32px;
         padding: 0 6px;
         margin: 0;
-        background: #fff;
+        background: var(--surface);
         border: 1px solid var(--border);
         border-right: none;
         border-top-left-radius: 5px;
@@ -482,7 +517,7 @@
         font-size: 12px;
         font-family: inherit;
         outline: none;
-        background: #fff;
+        background: var(--surface);
         color: var(--text);
     }
     .form-group .react-international-phone-input-container .react-international-phone-input:focus,
@@ -505,7 +540,7 @@
         font-size: 13px;
         outline: none;
         font-family: inherit;
-        background: #fff;
+        background: var(--surface);
         color: var(--text);
     }
     .search-bar input:focus {
@@ -530,7 +565,7 @@
         max-width: 750px;
         max-height: 88vh;
         overflow-y: auto;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 20px 60px var(--shadow-modal);
     }
     .modal.modal-sm { max-width: 480px; }
     .modal.modal-md { max-width: 560px; }
@@ -608,7 +643,7 @@
         width: 12px; height: 12px;
         border-radius: 50%;
         background: var(--primary);
-        border: 2px solid #fff;
+        border: 2px solid var(--card);
     }
     .timeline-item.completed::before { background: var(--success); }
     .timeline-item.failed::before    { background: var(--danger); }
@@ -652,7 +687,7 @@
     .client-block {
         margin-top: 8px;
         padding: 8px 10px;
-        background: #f8fafc;
+        background: var(--surface-muted);
         border-radius: 6px;
         border-left: 3px solid var(--accent);
     }
@@ -716,7 +751,7 @@
         position: absolute;
         top: 2px; left: 2px;
         width: 16px; height: 16px;
-        background: #fff;
+        background: #ffffff;
         border-radius: 50%;
         transition: left 0.2s;
     }
@@ -772,7 +807,7 @@
         min-width: 32px;
         height: 30px;
         padding: 0 10px;
-        background: #fff;
+        background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 5px;
         font-size: 12px;
@@ -784,6 +819,133 @@
     .page-btn:hover:not(:disabled) { border-color: var(--primary); }
     .page-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
     .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Dark-mode overrides ──────────────────────────────────────────────
+       Light pastels (status badges, partner tags, info boxes) look harsh
+       against dark cards — replace with darker translucent backgrounds +
+       brighter foreground text. Sidebar keeps its navy in both themes. */
+    [data-theme="dark"] .status-green       { background: rgba(34, 197, 94, 0.15);  color: #6ee7b7; }
+    [data-theme="dark"] .status-amber       { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+    [data-theme="dark"] .status-red         { background: rgba(239, 68, 68, 0.18);  color: #fca5a5; }
+    [data-theme="dark"] .status-pending     { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+    [data-theme="dark"] .status-in-progress { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
+    [data-theme="dark"] .status-completed   { background: rgba(34, 197, 94, 0.15);  color: #6ee7b7; }
+    [data-theme="dark"] .status-failed      { background: rgba(239, 68, 68, 0.18);  color: #fca5a5; }
+    [data-theme="dark"] .status-blacklisted { background: #000;                     color: #f87171; }
+
+    [data-theme="dark"] .tag-hcl   { background: rgba(59, 130, 246, 0.2);  color: #93c5fd; }
+    [data-theme="dark"] .tag-cog   { background: rgba(124, 58, 237, 0.2);  color: #c4b5fd; }
+    [data-theme="dark"] .tag-ltm   { background: rgba(14, 165, 233, 0.2);  color: #7dd3fc; }
+    [data-theme="dark"] .tag-tcs   { background: rgba(234, 88, 12, 0.22);  color: #fdba74; }
+    [data-theme="dark"] .tag-wipro { background: rgba(219, 39, 119, 0.2);  color: #f9a8d4; }
+    [data-theme="dark"] .tag-hex   { background: rgba(5, 150, 105, 0.22);  color: #6ee7b7; }
+    [data-theme="dark"] .tag-birla { background: rgba(202, 138, 4, 0.22);  color: #fde68a; }
+    [data-theme="dark"] .tag-minds { background: rgba(79, 70, 229, 0.22);  color: #a5b4fc; }
+    [data-theme="dark"] .tag-gray  { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+
+    [data-theme="dark"] .role-fte      { background: rgba(59, 130, 246, 0.2);  color: #93c5fd; }
+    [data-theme="dark"] .role-dispatch { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+    [data-theme="dark"] .role-pro      { background: rgba(124, 58, 237, 0.2);  color: #c4b5fd; }
+    [data-theme="dark"] .role-backfill { background: rgba(219, 39, 119, 0.2);  color: #f9a8d4; }
+
+    [data-theme="dark"] .region-badge  { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+    [data-theme="dark"] .region-canada { background: rgba(219, 39, 119, 0.2); color: #f9a8d4; }
+    [data-theme="dark"] .region-latam  { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+
+    [data-theme="dark"] .vendor-tag {
+        background: rgba(34, 197, 94, 0.15);
+        color: #6ee7b7;
+        border-color: rgba(34, 197, 94, 0.3);
+    }
+    [data-theme="dark"] .vendor-precisehire {
+        background: rgba(59, 130, 246, 0.18);
+        color: #93c5fd;
+        border-color: rgba(59, 130, 246, 0.35);
+    }
+
+    [data-theme="dark"] .info-blue {
+        background: rgba(59, 130, 246, 0.1);
+        color: #93c5fd;
+        border-color: rgba(59, 130, 246, 0.3);
+    }
+    [data-theme="dark"] .info-red {
+        background: rgba(239, 68, 68, 0.1);
+        color: #fca5a5;
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+    [data-theme="dark"] .info-green {
+        background: rgba(34, 197, 94, 0.1);
+        color: #6ee7b7;
+        border-color: rgba(34, 197, 94, 0.3);
+    }
+    [data-theme="dark"] .info-amber {
+        background: rgba(245, 158, 11, 0.1);
+        color: #fcd34d;
+        border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    [data-theme="dark"] .check-tag {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+    }
+    [data-theme="dark"] .check-item.done {
+        background: rgba(34, 197, 94, 0.08);
+        border-color: rgba(34, 197, 94, 0.3);
+    }
+    [data-theme="dark"] .check-item.failed {
+        background: rgba(239, 68, 68, 0.08);
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    [data-theme="dark"] .tab-count {
+        background: var(--surface);
+        color: var(--text-light);
+    }
+    [data-theme="dark"] .tab.active .tab-count {
+        background: rgba(107, 139, 196, 0.2);
+        color: #93c5fd;
+    }
+
+    [data-theme="dark"] .btn-outline:hover {
+        background: var(--surface);
+    }
+    [data-theme="dark"] .btn-accent { color: #0b1220; }
+
+    /* Soft shadow on cards so they lift off the dark background slightly */
+    [data-theme="dark"] .table-card,
+    [data-theme="dark"] .stat-card,
+    [data-theme="dark"] .report-card,
+    [data-theme="dark"] .setting-group,
+    [data-theme="dark"] .partner-card {
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+    }
+
+    /* Placeholder text in inputs needs extra help on dark surfaces */
+    [data-theme="dark"] input::placeholder,
+    [data-theme="dark"] textarea::placeholder {
+        color: var(--text-light);
+        opacity: 0.7;
+    }
+
+    /* Smooth flip between themes */
+    body,
+    .topbar,
+    .table-card,
+    .stat-card,
+    .report-card,
+    .setting-group,
+    .partner-card,
+    .modal,
+    .check-item,
+    .filter-input,
+    .page-btn,
+    .form-group input,
+    .form-group select,
+    .form-group textarea,
+    .search-bar input {
+        transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    }
 }
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */

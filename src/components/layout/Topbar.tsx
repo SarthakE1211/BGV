@@ -1,15 +1,16 @@
 // src/components/layout/Topbar.tsx
 "use client";
 
-import Link from "next/link";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { UserRole } from "@/src/lib/enums";
 import M365SyncButton from "@/src/components/layout/M365SyncButton";
+import NewRequestModal from "@/src/components/requests/NewRequestModal";
+import ThemeToggle from "@/src/components/theme/ThemeToggle";
 
 const ROUTE_TITLE: Record<string, string> = {
     "/dashboard": "Dashboard",
     "/requests": "BGV Requests",
-    "/requests/new": "New BGV Request",
     "/tracker": "BGV Tracker",
     "/database": "Employee Database",
     "/blacklist": "Blacklist Registry",
@@ -33,18 +34,28 @@ export default function Topbar({ role }: Props) {
     const title = resolveTitle(pathname);
     const canCreateRequest = role === "SDM" || role === "HR_HEAD";
     const canSyncM365 = role === "HR_HEAD";
+    const [modalOpen, setModalOpen] = useState(false);
 
     return (
-        <div className="topbar">
-            <h1 id="page-title">{title}</h1>
-            <div className="topbar-actions">
-                {canSyncM365 && <M365SyncButton />}
-                {canCreateRequest && (
-                    <Link href="/requests/new" className="btn btn-primary btn-sm">
-                        + New BGV Request
-                    </Link>
-                )}
+        <>
+            <div className="topbar">
+                <h1 id="page-title">{title}</h1>
+                <div className="topbar-actions">
+                    <ThemeToggle />
+                    {canSyncM365 && <M365SyncButton />}
+                    {canCreateRequest && (
+                        <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => setModalOpen(true)}
+                        >
+                            + New BGV Request
+                        </button>
+                    )}
+                </div>
             </div>
-        </div>
+            {canCreateRequest && (
+                <NewRequestModal open={modalOpen} onClose={() => setModalOpen(false)} />
+            )}
+        </>
     );
 }

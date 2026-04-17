@@ -77,6 +77,70 @@ async function getAppToken(): Promise<string> {
     return json.access_token;
 }
 
+/**
+ * Sends an email on behalf of a shared mailbox / service account using the
+ * Microsoft Graph `/users/{sender}/sendMail` endpoint.
+ *
+ * Requires the Azure app to have:
+ *   Mail.Send  (Application permission, admin-consented)
+ *
+ * Set MAIL_SENDER in your .env to the UPN or object-id of the sending mailbox
+ * (e.g. "bgv-noreply@yourcompany.com"). Falls back to the signed-in app's
+ * own mailbox if the env var is absent.
+ */
+export async function sendMail(opts: {
+    to: string;
+    subject: string;
+    body: string;
+    bodyType?: "Text" | "HTML";
+}): Promise<void> {
+    const sender = process.env.MAIL_SENDER;
+    if (!sender) {
+        throw new AppError(
+            "INTERNAL",
+            "MAIL_SENDER env var is not set — cannot send mail via Graph",
+            { status: 500 }
+        );
+    }
+
+    const token = await getAppToken();
+
+    const payload = {
+        message: {
+            subject: opts.subject,
+            body: {
+                contentType: opts.bodyType ?? "Text",
+                content: opts.body,
+            },
+            toRecipients: [
+                { emailAddress: { address: opts.to } },
+            ],
+        },
+        saveToSentItems: false,
+    };
+
+    const res = await fetch(
+        `${GRAPH_BASE}/users/${encodeURIComponent(sender)}/sendMail`,
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        }
+    );
+
+    if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        logger.error("graph.sendMail failed", { status: res.status, body: text });
+        throw new AppError("INTERNAL", "Microsoft Graph /sendMail failed", {
+            status: 502,
+            details: { azureStatus: res.status },
+        });
+    }
+}
+
 export interface GraphUser {
     id: string;
     displayName: string | null;

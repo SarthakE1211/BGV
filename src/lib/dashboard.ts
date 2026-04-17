@@ -35,12 +35,16 @@ export interface ActiveRequestRow {
 }
 
 /**
- * Role-aware WHERE fragment. SDMs can only see their own requests.
+ * Role-aware WHERE fragment. SDMs see their own submissions; SPECIALISTs
+ * see only requests assigned to them. HR_HEAD sees all.
  * Returns `{ clause, params }` to splice into a prepared statement.
  */
 function ownerScope(role: UserRole, userId: string) {
     if (role === "SDM") {
         return { clause: "AND submitted_by_id = ?", params: [userId] };
+    }
+    if (role === "SPECIALIST") {
+        return { clause: "AND assigned_specialist_id = ?", params: [userId] };
     }
     return { clause: "", params: [] as string[] };
 }
@@ -79,11 +83,13 @@ export async function getDashboardStats(
     );
 
     // Check-level counts: pending/in-progress individual checks + overdue subset.
-    // Apply the same SDM scope by joining to bgv_requests.
+    // Apply the same ownership scope by joining to bgv_requests.
     const checkScope =
         role === "SDM"
             ? { clause: "AND r.submitted_by_id = ?", params: [userId] as unknown[] }
-            : { clause: "", params: [] as unknown[] };
+            : role === "SPECIALIST"
+              ? { clause: "AND r.assigned_specialist_id = ?", params: [userId] as unknown[] }
+              : { clause: "", params: [] as unknown[] };
 
     const checkAgg = await queryOne<{
         pending_checks: number | null;
@@ -156,7 +162,7 @@ export async function getActiveRequests(
             c.email AS candidate_email,
             p.name  AS partner_name,
             p.code  AS partner_code,
-            pc.client_name AS client_name,
+            COALESCE(r.client_account, pc.client_name) AS client_name,
             (SELECT COUNT(*) FROM bgv_checks WHERE bgv_request_id = r.id)                    AS checks_total,
             (SELECT COUNT(*) FROM bgv_checks WHERE bgv_request_id = r.id AND status='CLEARED') AS checks_cleared
          FROM bgv_requests r
@@ -164,7 +170,9 @@ export async function getActiveRequests(
          JOIN partners   p      ON p.id = r.partner_id
          LEFT JOIN partner_clients pc ON pc.id = r.partner_client_id
          WHERE r.status NOT IN ('GREEN','BLACKLISTED')
-         ${scope.clause.replace(/submitted_by_id/g, "r.submitted_by_id")}
+         ${scope.clause
+            .replace(/submitted_by_id/g, "r.submitted_by_id")
+            .replace(/assigned_specialist_id/g, "r.assigned_specialist_id")}
          ORDER BY r.created_at DESC
          LIMIT ${safeLimit}`,
         scope.params
@@ -205,7 +213,9 @@ export async function getPartnerBreakdown(
     const scope =
         role === "SDM"
             ? { clause: "AND r.submitted_by_id = ?", params: [userId] as unknown[] }
-            : { clause: "", params: [] as unknown[] };
+            : role === "SPECIALIST"
+              ? { clause: "AND r.assigned_specialist_id = ?", params: [userId] as unknown[] }
+              : { clause: "", params: [] as unknown[] };
 
     const rows = await query<{
         code: string;

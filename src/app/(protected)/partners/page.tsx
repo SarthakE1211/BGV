@@ -3,6 +3,7 @@
 import { requireAuth } from "@/src/lib/auth.helpers";
 import { getPartnersConfig, type PartnerConfigRow } from "@/src/lib/partners-config";
 import PartnersTabs from "@/src/components/partners/PartnersTabs";
+import PartnerChecksEditor from "@/src/components/partners/PartnerChecksEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -31,17 +32,22 @@ function pick(sp: Record<string, string | string[] | undefined>, key: string) {
 export default async function PartnersPage({ searchParams }: PageProps) {
     await requireAuth("HR_HEAD");
     const sp = await searchParams;
-    const tabParam = (pick(sp, "tab") ?? "HCL").toUpperCase();
+    const tabParam = (pick(sp, "tab") ?? "ALL").toUpperCase();
 
     const all = await getPartnersConfig();
 
     const mainCodes = new Set<string>(MAIN_TAB_CODES as readonly string[]);
     const visible =
-        tabParam === "OTHERS"
-            ? all.filter((p) => !mainCodes.has(p.code))
-            : all.filter((p) => p.code === tabParam);
+        tabParam === "ALL"
+            ? all
+            : tabParam === "OTHERS"
+              ? all.filter((p) => !mainCodes.has(p.code))
+              : all.filter((p) => p.code === tabParam);
+
+    const totalCards = all.reduce((n, p) => n + 1 + p.clients.length, 0);
 
     const tabCounts = {
+        ALL: totalCards,
         HCL: countCards(all, "HCL"),
         COG: countCards(all, "COG"),
         LTM: countCards(all, "LTM"),
@@ -111,6 +117,11 @@ export default async function PartnersPage({ searchParams }: PageProps) {
                                     </span>
                                 ))}
                             </div>
+                            <PartnerChecksEditor
+                                partnerId={p.id}
+                                partnerName={p.name}
+                                initialChecks={p.standardChecks}
+                            />
                         </div>
                     );
 

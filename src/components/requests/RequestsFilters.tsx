@@ -6,8 +6,8 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState, useTransition } from "react";
-import Link from "next/link";
 import type { UserRole } from "@/src/lib/enums";
+import NewRequestModal from "@/src/components/requests/NewRequestModal";
 
 interface Props {
     partners: Array<{ code: string; name: string }>;
@@ -20,6 +20,7 @@ export default function RequestsFilters({ partners, sdms, role }: Props) {
     const pathname = usePathname();
     const params = useSearchParams();
     const [, startTransition] = useTransition();
+    const [modalOpen, setModalOpen] = useState(false);
 
     const [qLocal, setQLocal] = useState(params.get("q") ?? "");
     useEffect(() => {
@@ -107,9 +108,18 @@ export default function RequestsFilters({ partners, sdms, role }: Props) {
                 </select>
             )}
             {canCreateRequest && (
-                <Link href="/requests/new" className="btn btn-primary btn-sm">
-                    + New Request
-                </Link>
+                <>
+                    <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => setModalOpen(true)}
+                    >
+                        + New Request
+                    </button>
+                    <NewRequestModal
+                        open={modalOpen}
+                        onClose={() => setModalOpen(false)}
+                    />
+                </>
             )}
         </div>
     );

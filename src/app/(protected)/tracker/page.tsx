@@ -77,6 +77,7 @@ export default async function TrackerPage({ searchParams }: PageProps) {
             <TrackerTable
                 rows={rows}
                 viewerRole={user.role}
+                specialists={specialists}
                 filtersSlot={
                     <TrackerFilters partners={partners} specialists={specialists} />
                 }

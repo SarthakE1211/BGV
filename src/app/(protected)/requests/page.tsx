@@ -12,7 +12,6 @@ import {
 } from "@/src/lib/requests";
 import type { Region, RoleType } from "@/src/lib/enums";
 import RequestsToolbar from "@/src/components/requests/RequestsToolbar";
-import RequestsFilters from "@/src/components/requests/RequestsFilters";
 import RequestsTable from "@/src/components/requests/RequestsTable";
 import RequestsPagination from "@/src/components/requests/RequestsPagination";
 
@@ -79,9 +78,9 @@ export default async function RequestsPage({ searchParams }: PageProps) {
                 rows={listResult.rows}
                 page={listResult.page}
                 pageSize={PAGE_SIZE}
-                filtersSlot={
-                    <RequestsFilters partners={partners} sdms={sdms} role={user.role} />
-                }
+                viewerRole={user.role}
+                partners={partners}
+                sdms={sdms}
             />
             <RequestsPagination
                 page={listResult.page}

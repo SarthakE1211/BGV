@@ -25,7 +25,7 @@ export default async function DashboardPage() {
         <>
             <StatCards stats={stats} />
             <PartnerBreakdown rows={breakdown} />
-            <ActiveRequestsTable rows={rows} />
+            <ActiveRequestsTable rows={rows} viewerRole={user.role} />
         </>
     );
 }

@@ -5,6 +5,7 @@ import { requireAuth } from "@/src/lib/auth.helpers";
 import { listBlacklist, PAGE_SIZE } from "@/src/lib/blacklist-registry";
 import PartnerTag from "@/src/components/ui/PartnerTag";
 import RequestsPagination from "@/src/components/requests/RequestsPagination";
+import { fmtDateTime } from "@/src/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -100,11 +101,7 @@ export default async function BlacklistPage({ searchParams }: PageProps) {
                                         {r.reason}
                                     </td>
                                     <td style={{ color: "var(--text-light)" }}>
-                                        {new Date(r.createdAt).toLocaleDateString("en-US", {
-                                            month: "short",
-                                            day: "2-digit",
-                                            year: "numeric",
-                                        })}
+                                        {fmtDateTime(r.createdAt)}
                                     </td>
                                     <td>{r.blacklistedBy}</td>
                                 </tr>
