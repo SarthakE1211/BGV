@@ -67,8 +67,8 @@ export default async function RequestsPage({ searchParams }: PageProps) {
     const [listResult, tabCounts, partners, sdms] = await Promise.all([
         listRequests(user.role, user.id, filters, page),
         getTabCounts(user.role, user.id),
-        getPartnerOptions(),
-        user.role === "SDM" ? Promise.resolve([]) : getSDMOptions(),
+        getPartnerOptions(user.id),
+        user.role === "SDM" ? Promise.resolve([]) : getSDMOptions(user.id),
     ]);
 
     return (

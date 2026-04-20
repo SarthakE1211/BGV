@@ -1,17 +1,8 @@
-// GET /api/requests/[id]/letter — serves the BGV clearance letter as HTML.
-// If the letter has already been issued, returns the immutable snapshot from
-// bgv_requests.letter_html (same bytes that were uploaded to Blob). If not,
-// live-renders for preview so HR can see what the letter will look like
-// before they actually issue it.
+// GET /api/requests/[id]/letter — proxies to Django for the clearance letter HTML.
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { queryOne } from "@/src/lib/db";
-import {
-    getRequestDetail,
-    getRequestChecks,
-} from "@/src/lib/request-detail";
-import { renderClearanceLetterHtml } from "@/src/lib/letter";
+import { api } from "@/src/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -22,56 +13,28 @@ export async function GET(
     const user = await requireAuth();
     const { id } = await params;
 
-    // Fast path: letter has been issued → serve the immutable snapshot,
-    // but only if the caller is allowed to see this request.
-    //   SDM        → must be the submitter
-    //   SPECIALIST → must be the assigned specialist
-    //   HR_HEAD    → always allowed
-    const snapshot = await queryOne<{
-        letter_html: string | null;
-        submitted_by_id: string;
-        assigned_specialist_id: string | null;
-    }>(
-        `SELECT letter_html, submitted_by_id, assigned_specialist_id
-         FROM bgv_requests WHERE id = ? LIMIT 1`,
-        [id]
-    );
-    if (snapshot) {
-        if (user.role === "SDM" && snapshot.submitted_by_id !== user.id) {
-            return NextResponse.json({ error: "Not found" }, { status: 404 });
-        }
-        if (
-            user.role === "SPECIALIST" &&
-            snapshot.assigned_specialist_id !== user.id
-        ) {
-            return NextResponse.json({ error: "Not found" }, { status: 404 });
-        }
-        if (snapshot.letter_html) {
-            return new NextResponse(snapshot.letter_html, {
-                status: 200,
-                headers: { "Content-Type": "text/html; charset=utf-8" },
-            });
-        }
-    }
+    try {
+        const res = await api<Response>(`/bgv/requests/${id}/letter/`, {
+            userId: user.id,
+            raw: true,
+        });
 
-    // Fallback: live preview. Only allowed when the request is GREEN + approved.
-    const [request, checks] = await Promise.all([
-        getRequestDetail(id, user.role, user.id),
-        getRequestChecks(id),
-    ]);
-    if (!request) {
+        const rawRes = res as unknown as Response;
+        const html = await rawRes.text();
+
+        // Forward Django's Content-Disposition so the browser print/save
+        // dialog shows the candidate name in the filename.
+        const disposition = rawRes.headers.get("Content-Disposition") ?? "";
+
+        const headers: Record<string, string> = {
+            "Content-Type": "text/html; charset=utf-8",
+        };
+        if (disposition) {
+            headers["Content-Disposition"] = disposition;
+        }
+
+        return new NextResponse(html, { status: 200, headers });
+    } catch {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-    if (request.status !== "GREEN" || !request.approvedBy) {
-        return NextResponse.json(
-            { error: "Request must be GREEN and approved" },
-            { status: 400 }
-        );
-    }
-
-    const html = renderClearanceLetterHtml(request, checks);
-    return new NextResponse(html, {
-        status: 200,
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
 }

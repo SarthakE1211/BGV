@@ -2,8 +2,9 @@
 //
 // Read-only view of partners + their clients + check matrices.
 // Powers the Partners & Checks admin page.
+// Calls Django REST API instead of direct MySQL queries.
 
-import { query } from "@/src/lib/db";
+import { api } from "@/src/lib/api-client";
 
 export interface PartnerConfigRow {
     id: string;
@@ -34,52 +35,36 @@ function parseJsonArray(v: unknown): string[] {
     return [];
 }
 
-export async function getPartnersConfig(): Promise<PartnerConfigRow[]> {
-    const partners = await query<{
-        id: string;
-        code: string;
-        name: string;
-        standard_checks: unknown;
-        is_active: 0 | 1;
-    }>(
-        `SELECT id, code, name, standard_checks, is_active
-         FROM partners ORDER BY name ASC`
-    );
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export async function getPartnersConfig(userId?: string): Promise<PartnerConfigRow[]> {
+    const data = await api<any>("/partners/config/", {
+        userId,
+        params: { page_size: 100 },
+    });
 
-    const clients = await query<{
-        id: string;
-        partner_id: string;
-        client_name: string;
-        usa_checks: unknown;
-        canada_checks: unknown;
-        latam_checks: unknown;
-        special_notes: string | null;
-    }>(
-        `SELECT id, partner_id, client_name, usa_checks, canada_checks, latam_checks, special_notes
-         FROM partner_clients
-         ORDER BY client_name ASC`
-    );
+    // Handle both paginated { results: [...] } and flat array responses
+    const rows: any[] = Array.isArray(data) ? data : (data.results ?? []);
 
-    const byPartner = new Map<string, PartnerConfigRow["clients"]>();
-    for (const c of clients) {
-        const list = byPartner.get(c.partner_id) ?? [];
-        list.push({
-            id: c.id,
-            clientName: c.client_name,
-            usaChecks: parseJsonArray(c.usa_checks),
-            canadaChecks: parseJsonArray(c.canada_checks),
-            latamChecks: parseJsonArray(c.latam_checks),
-            specialNotes: c.special_notes,
-        });
-        byPartner.set(c.partner_id, list);
-    }
-
-    return partners.map((p) => ({
+    return rows.map((p: any) => ({
         id: p.id,
         code: p.code,
         name: p.name,
-        standardChecks: parseJsonArray(p.standard_checks),
-        isActive: Boolean(p.is_active),
-        clients: byPartner.get(p.id) ?? [],
+        standardChecks: parseJsonArray(
+            p.standard_checks ?? p.standardChecks ?? []
+        ),
+        isActive: Boolean(p.is_active ?? p.isActive ?? true),
+        clients: (p.clients ?? []).map((c: any) => ({
+            id: c.id,
+            clientName: c.client_name ?? c.clientName ?? "",
+            usaChecks: parseJsonArray(c.usa_checks ?? c.usaChecks ?? []),
+            canadaChecks: parseJsonArray(
+                c.canada_checks ?? c.canadaChecks ?? []
+            ),
+            latamChecks: parseJsonArray(
+                c.latam_checks ?? c.latamChecks ?? []
+            ),
+            specialNotes: c.special_notes ?? c.specialNotes ?? null,
+        })),
     }));
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */

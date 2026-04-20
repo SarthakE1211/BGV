@@ -3,7 +3,7 @@ import { requireAuth } from "@/src/lib/auth.helpers";
 import { getSpecialistOptions } from "@/src/lib/tracker";
 
 export async function GET() {
-    await requireAuth();
-    const specialists = await getSpecialistOptions();
+    const user = await requireAuth();
+    const specialists = await getSpecialistOptions(user.id);
     return NextResponse.json({ specialists });
 }

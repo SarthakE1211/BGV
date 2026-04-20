@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import RequestForm from "@/src/components/requests/RequestForm";
-import type { PartnerOption } from "@/src/lib/partners";
+import type { PartnerOption } from "@/src/lib/requests";
 
 interface Props {
     open: boolean;

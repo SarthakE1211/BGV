@@ -17,9 +17,10 @@ interface Props {
     groups: RequestGroup[];
     specialists: Array<{ id: string; name: string }>;
     canActOnChecks: boolean;
+    canAssignSpecialist: boolean;
 }
 
-export default function TrackerRowList({ groups, specialists, canActOnChecks }: Props) {
+export default function TrackerRowList({ groups, specialists, canActOnChecks, canAssignSpecialist }: Props) {
     const [openId, setOpenId] = useState<string | null>(null);
 
     const toggle = (requestId: string) =>
@@ -54,6 +55,7 @@ export default function TrackerRowList({ groups, specialists, canActOnChecks }: 
                     clientName={g.clientName}
                     checks={g.checks}
                     canActOnChecks={canActOnChecks}
+                    canAssignSpecialist={canAssignSpecialist}
                     open={openId === g.requestId}
                     onToggle={() => toggle(g.requestId)}
                     specialists={specialists}

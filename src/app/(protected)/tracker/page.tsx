@@ -65,10 +65,10 @@ export default async function TrackerPage({ searchParams }: PageProps) {
     const page = Math.max(1, Number(pick(sp, "page") ?? 1) || 1);
 
     const [{ rows, total }, counts, partners, specialists] = await Promise.all([
-        listChecks(filters, page),
-        getCheckTabCounts(),
-        getPartnerOptions(),
-        getSpecialistOptions(),
+        listChecks(filters, page, user.id),
+        getCheckTabCounts(user.id),
+        getPartnerOptions(user.id),
+        getSpecialistOptions(user.id),
     ]);
 
     return (

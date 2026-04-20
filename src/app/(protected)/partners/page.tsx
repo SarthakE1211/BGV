@@ -30,11 +30,11 @@ function pick(sp: Record<string, string | string[] | undefined>, key: string) {
 }
 
 export default async function PartnersPage({ searchParams }: PageProps) {
-    await requireAuth("HR_HEAD");
+    const user = await requireAuth("HR_HEAD");
     const sp = await searchParams;
     const tabParam = (pick(sp, "tab") ?? "ALL").toUpperCase();
 
-    const all = await getPartnersConfig();
+    const all = await getPartnersConfig(user.id);
 
     const mainCodes = new Set<string>(MAIN_TAB_CODES as readonly string[]);
     const visible =

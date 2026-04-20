@@ -1,9 +1,10 @@
 // src/lib/report.ts
 //
-// Daily report aggregates: per-partner active counts, overdue checks
-// (older than N days), and today's email log.
+// Daily report aggregates: per-partner active counts, overdue checks,
+// and today's email log.
+// Calls Django REST API instead of direct MySQL queries.
 
-import { query, queryOne } from "@/src/lib/db";
+import { api } from "@/src/lib/api-client";
 import type { CheckStatus, UserRole } from "@/src/lib/enums";
 
 export const OVERDUE_DAYS = 5;
@@ -14,64 +15,6 @@ export interface DailySummary {
     newRequestsToday: number;
     overdueChecks: number;
     lettersIssuedToday: number;
-}
-
-/** Scope the report data by viewer: SDMs see only their own submissions,
- *  SPECIALISTs only their assigned requests. HR_HEAD sees everything. */
-function reportScope(role: UserRole, userId: string, alias = "") {
-    const col = (c: string) => (alias ? `${alias}.${c}` : c);
-    if (role === "SDM") {
-        return { clause: `AND ${col("submitted_by_id")} = ?`, params: [userId] as unknown[] };
-    }
-    if (role === "SPECIALIST") {
-        return {
-            clause: `AND ${col("assigned_specialist_id")} = ?`,
-            params: [userId] as unknown[],
-        };
-    }
-    return { clause: "", params: [] as unknown[] };
-}
-
-export async function getDailySummary(
-    role: UserRole,
-    userId: string
-): Promise<DailySummary> {
-    const scope = reportScope(role, userId);
-    const row = await queryOne<{
-        total_active: number | null;
-        completed_today: number | null;
-        new_today: number | null;
-        letters_today: number | null;
-    }>(
-        `SELECT
-            COALESCE(SUM(status IN ('PENDING','IN_PROGRESS','AMBER')), 0)                 AS total_active,
-            COALESCE(SUM(status = 'GREEN' AND completion_date >= CURRENT_DATE), 0)        AS completed_today,
-            COALESCE(SUM(created_at >= CURRENT_DATE), 0)                                  AS new_today,
-            COALESCE(SUM(letter_issued_date IS NOT NULL AND letter_issued_date >= CURRENT_DATE), 0) AS letters_today
-         FROM bgv_requests
-         WHERE 1=1 ${scope.clause}`,
-        scope.params
-    );
-
-    // Overdue checks need the join to bgv_requests to apply the scope.
-    const checkScope = reportScope(role, userId, "r");
-    const overdueRow = await queryOne<{ n: number }>(
-        `SELECT COUNT(*) AS n
-         FROM bgv_checks ch
-         JOIN bgv_requests r ON r.id = ch.bgv_request_id
-         WHERE ch.status IN ('PENDING','IN_PROGRESS')
-           AND COALESCE(ch.started_at, ch.created_at) < (NOW() - INTERVAL ? DAY)
-           ${checkScope.clause}`,
-        [OVERDUE_DAYS, ...checkScope.params]
-    );
-
-    return {
-        totalActive: Number(row?.total_active ?? 0),
-        completedToday: Number(row?.completed_today ?? 0),
-        newRequestsToday: Number(row?.new_today ?? 0),
-        overdueChecks: Number(overdueRow?.n ?? 0),
-        lettersIssuedToday: Number(row?.letters_today ?? 0),
-    };
 }
 
 export interface PartnerProgressRow {
@@ -100,26 +43,49 @@ export interface EmailLogRow {
     status: string;
 }
 
+export async function getDailySummary(
+    role: UserRole,
+    userId: string
+): Promise<DailySummary> {
+    const data = await api<{
+        total_active?: number;
+        totalActive?: number;
+        completed_today?: number;
+        completedToday?: number;
+        new_requests_today?: number;
+        newRequestsToday?: number;
+        overdue_checks?: number;
+        overdueChecks?: number;
+        letters_issued_today?: number;
+        lettersIssuedToday?: number;
+    }>("/reports/daily-summary/", { userId });
+
+    return {
+        totalActive: Number(data.total_active ?? data.totalActive ?? 0),
+        completedToday: Number(data.completed_today ?? data.completedToday ?? 0),
+        newRequestsToday: Number(
+            data.new_requests_today ?? data.newRequestsToday ?? 0
+        ),
+        overdueChecks: Number(data.overdue_checks ?? data.overdueChecks ?? 0),
+        lettersIssuedToday: Number(
+            data.letters_issued_today ?? data.lettersIssuedToday ?? 0
+        ),
+    };
+}
+
 export async function getPartnerProgress(
     role: UserRole,
     userId: string
 ): Promise<PartnerProgressRow[]> {
-    const scope = reportScope(role, userId, "r");
-    return query<PartnerProgressRow>(
-        `SELECT
-            p.code,
-            p.name,
-            COALESCE(COUNT(r.id), 0) AS active
-         FROM partners p
-         LEFT JOIN bgv_requests r
-             ON r.partner_id = p.id
-            AND r.status NOT IN ('GREEN','BLACKLISTED')
-            ${scope.clause}
-         WHERE p.is_active = 1
-         GROUP BY p.id, p.code, p.name
-         ORDER BY active DESC, p.name ASC`,
-        scope.params
+    const rows = await api<PartnerProgressRow[]>(
+        "/reports/partner-progress/",
+        { userId }
     );
+    return rows.map((r) => ({
+        code: r.code,
+        name: r.name,
+        active: Number(r.active ?? 0),
+    }));
 }
 
 export async function getOverdueChecks(
@@ -127,48 +93,38 @@ export async function getOverdueChecks(
     userId: string,
     days = OVERDUE_DAYS
 ): Promise<OverdueRow[]> {
-    const scope = reportScope(role, userId, "r");
-    const rows = await query<{
+    interface ApiOverdueRow {
         id: string;
-        candidate_name: string;
-        partner_code: string;
-        client_name: string | null;
-        check_type: string;
-        days_overdue: number;
-        assigned_to: string | null;
-        request_id: string;
-    }>(
-        `SELECT
-            ch.id,
-            c.name  AS candidate_name,
-            p.code  AS partner_code,
-            pc.client_name,
-            ch.check_type,
-            DATEDIFF(NOW(), COALESCE(ch.started_at, ch.created_at)) AS days_overdue,
-            u.name  AS assigned_to,
-            r.id    AS request_id
-         FROM bgv_checks ch
-         JOIN bgv_requests r ON r.id = ch.bgv_request_id
-         JOIN candidates  c  ON c.id = r.candidate_id
-         JOIN partners    p  ON p.id = r.partner_id
-         LEFT JOIN partner_clients pc ON pc.id = r.partner_client_id
-         LEFT JOIN users  u  ON u.id = ch.assigned_to_id
-         WHERE ch.status IN ('PENDING','IN_PROGRESS')
-           AND COALESCE(ch.started_at, ch.created_at) < (NOW() - INTERVAL ? DAY)
-           ${scope.clause}
-         ORDER BY days_overdue DESC, c.name ASC
-         LIMIT 100`,
-        [days, ...scope.params]
-    );
+        candidate_name?: string;
+        candidateName?: string;
+        partner_code?: string;
+        partnerCode?: string;
+        client_name?: string | null;
+        clientName?: string | null;
+        check_type?: string;
+        checkType?: string;
+        days_overdue?: number;
+        daysOverdue?: number;
+        assigned_to?: string | null;
+        assignedTo?: string | null;
+        request_id?: string;
+        requestId?: string;
+    }
+
+    const rows = await api<ApiOverdueRow[]>("/reports/overdue-checks/", {
+        userId,
+        params: { days },
+    });
+
     return rows.map((r) => ({
         id: r.id,
-        candidateName: r.candidate_name,
-        partnerCode: r.partner_code,
-        clientName: r.client_name,
-        checkType: r.check_type,
-        daysOverdue: Number(r.days_overdue),
-        assignedTo: r.assigned_to,
-        requestId: r.request_id,
+        candidateName: r.candidate_name ?? r.candidateName ?? "",
+        partnerCode: r.partner_code ?? r.partnerCode ?? "",
+        clientName: r.client_name ?? r.clientName ?? null,
+        checkType: r.check_type ?? r.checkType ?? "",
+        daysOverdue: Number(r.days_overdue ?? r.daysOverdue ?? 0),
+        assignedTo: r.assigned_to ?? r.assignedTo ?? null,
+        requestId: r.request_id ?? r.requestId ?? "",
     }));
 }
 
@@ -176,36 +132,25 @@ export async function getTodayEmailLog(
     role: UserRole,
     userId: string
 ): Promise<EmailLogRow[]> {
-    // For non-HR users, restrict to emails tied to requests they own/are assigned.
-    // Emails with NULL bgv_request_id (e.g. DAILY_REPORT) are hidden from them.
-    const scope = reportScope(role, userId, "r");
-    const join =
-        role === "HR_HEAD"
-            ? ""
-            : `JOIN bgv_requests r ON r.id = el.bgv_request_id`;
-
-    const rows = await query<{
+    interface ApiEmailRow {
         id: string;
-        sent_at: Date;
-        trigger_type: string;
-        recipient_email: string;
+        sent_at?: string;
+        sentAt?: string;
+        trigger_type?: string;
+        triggerType?: string;
+        recipient_email?: string;
+        recipientEmail?: string;
         subject: string;
         status: string;
-    }>(
-        `SELECT el.id, el.sent_at, el.trigger_type, el.recipient_email, el.subject, el.status
-         FROM email_logs el
-         ${join}
-         WHERE el.sent_at >= CURRENT_DATE
-         ${scope.clause}
-         ORDER BY el.sent_at DESC
-         LIMIT 100`,
-        scope.params
-    );
+    }
+
+    const rows = await api<ApiEmailRow[]>("/reports/email-log/", { userId });
+
     return rows.map((r) => ({
         id: r.id,
-        sentAt: r.sent_at,
-        triggerType: r.trigger_type,
-        recipientEmail: r.recipient_email,
+        sentAt: new Date(r.sent_at ?? r.sentAt ?? ""),
+        triggerType: r.trigger_type ?? r.triggerType ?? "",
+        recipientEmail: r.recipient_email ?? r.recipientEmail ?? "",
         subject: r.subject,
         status: r.status,
     }));
@@ -220,13 +165,19 @@ export async function getCheckStatusBreakdown(
     role: UserRole,
     userId: string
 ): Promise<CheckStatusBreakdown[]> {
-    const scope = reportScope(role, userId, "r");
-    return query<CheckStatusBreakdown>(
-        `SELECT ch.status, COUNT(*) AS n
-         FROM bgv_checks ch
-         JOIN bgv_requests r ON r.id = ch.bgv_request_id
-         WHERE 1=1 ${scope.clause}
-         GROUP BY ch.status`,
-        scope.params
-    );
+    // The dashboard endpoint includes check status data. If there's a
+    // dedicated endpoint, use it. Otherwise derive from the dashboard.
+    const data = await api<{
+        stats?: { check_breakdown?: CheckStatusBreakdown[] };
+    }>("/reports/dashboard/", { userId });
+
+    if (data.stats?.check_breakdown) {
+        return data.stats.check_breakdown.map((r) => ({
+            status: r.status,
+            n: Number(r.n ?? 0),
+        }));
+    }
+
+    // Fallback: return empty if the dashboard doesn't include breakdown
+    return [];
 }

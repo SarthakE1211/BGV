@@ -11,12 +11,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { execute, query, queryOne } from "@/src/lib/db";
+import { api, ApiError } from "@/src/lib/api-client";
 import { UserRole } from "@/src/lib/enums";
-import { AppError, toActionResult, type ErrorCode } from "@/src/lib/errors";
-import { cuid } from "@/src/lib/ids";
-import { logger } from "@/src/lib/logger";
-import type { UserRow } from "@/src/lib/types";
+import type { ErrorCode } from "@/src/lib/errors";
 
 export interface ManagedUser {
     id: string;
@@ -55,32 +52,41 @@ function invalidate() {
 
 /** HR Head only. Returns all users (active + inactive). */
 export async function listUsers(): Promise<ManagedUser[]> {
-    await requireAuth(UserRole.HR_HEAD);
+    const user = await requireAuth(UserRole.HR_HEAD);
 
-    const rows = await query<UserRow>(
-        `SELECT id, name, email, role, image, azure_ad_id, is_active, created_at
-         FROM users
-         ORDER BY is_active DESC, role, name`
-    );
+    try {
+        // Django returns paginated { count, results: [...] } with snake_case
+        const data = await api<{
+            count?: number;
+            results?: Array<Record<string, unknown>>;
+        } | Array<Record<string, unknown>>>("/users/", {
+            userId: user.id,
+            params: { page_size: 200 },
+        });
 
-    return rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        email: r.email,
-        role: r.role,
-        isActive: Boolean(r.is_active),
-        hasLoggedIn: Boolean(r.azure_ad_id),
-        createdAt: (r.created_at instanceof Date
-            ? r.created_at.toISOString()
-            : String(r.created_at)) as string,
-    }));
+        const rows = Array.isArray(data) ? data : (data.results ?? []);
+        return rows.map((r) => ({
+            id: String(r.id ?? ""),
+            name: String(r.name ?? ""),
+            email: String(r.email ?? ""),
+            role: (r.role ?? "SDM") as UserRole,
+            isActive: Boolean(r.is_active ?? r.isActive ?? true),
+            hasLoggedIn: Boolean(r.azure_ad_id ?? r.azureAdId ?? r.has_logged_in ?? r.hasLoggedIn ?? false),
+            createdAt: String(r.created_at ?? r.createdAt ?? ""),
+        }));
+    } catch (e) {
+        if (e instanceof ApiError) {
+            throw new Error(e.message);
+        }
+        throw e;
+    }
 }
 
 export async function addUser(input: {
     email: string;
     role: UserRole;
 }): Promise<Ok<{ userId: string }> | Fail> {
-    const actor = await requireAuth(UserRole.HR_HEAD);
+    const user = await requireAuth(UserRole.HR_HEAD);
 
     const parsed = AddUserSchema.safeParse(input);
     if (!parsed.success) {
@@ -89,30 +95,25 @@ export async function addUser(input: {
     const { email, role } = parsed.data;
 
     try {
-        const existing = await queryOne<{ id: string }>(
-            "SELECT id FROM users WHERE email = ? LIMIT 1",
-            [email]
-        );
-        if (existing) {
-            throw new AppError(
-                "CONFLICT",
-                "A user with this email already exists.",
-                { field: "email" }
-            );
-        }
+        const result = await api<{ id: string }>("/users/", {
+            method: "POST",
+            body: { name: email.split("@")[0], email, role },
+            userId: user.id,
+        });
 
-        const id = cuid();
-        await execute(
-            `INSERT INTO users (id, name, email, role, is_active)
-             VALUES (?, ?, ?, ?, 1)`,
-            [id, email.split("@")[0], email, role]
-        );
-
-        logger.info("users.addUser", { actorId: actor.id, userId: id, email, role });
         invalidate();
-        return { ok: true, userId: id };
+        return { ok: true, userId: result.id };
     } catch (e) {
-        return toActionResult(e);
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            const msg = (body?.error as string) || e.message;
+            const code: ErrorCode =
+                e.status === 409 ? "CONFLICT" :
+                e.status === 400 ? "VALIDATION" :
+                "INTERNAL";
+            return { ok: false, error: msg, code, ...(e.status === 409 ? { field: "email" } : {}) };
+        }
+        return { ok: false, error: "Unexpected error" };
     }
 }
 
@@ -120,7 +121,7 @@ export async function updateUserRole(input: {
     userId: string;
     role: UserRole;
 }): Promise<Ok<object> | Fail> {
-    const actor = await requireAuth(UserRole.HR_HEAD);
+    const user = await requireAuth(UserRole.HR_HEAD);
 
     const parsed = UpdateRoleSchema.safeParse(input);
     if (!parsed.success) {
@@ -129,29 +130,26 @@ export async function updateUserRole(input: {
     const { userId, role } = parsed.data;
 
     try {
-        if (userId === actor.id && role !== UserRole.HR_HEAD) {
-            throw new AppError(
-                "FORBIDDEN",
-                "You cannot demote your own HR Head role. Ask another HR Head to make this change."
-            );
-        }
+        await api(`/users/${userId}/role/`, {
+            method: "PATCH",
+            body: { role },
+            userId: user.id,
+        });
 
-        const target = await queryOne<{ id: string; role: UserRole }>(
-            "SELECT id, role FROM users WHERE id = ? LIMIT 1",
-            [userId]
-        );
-        if (!target) throw new AppError("NOT_FOUND", "User not found.");
-
-        if (target.role === UserRole.HR_HEAD && role !== UserRole.HR_HEAD) {
-            await assertAnotherHRHeadExists(target.id);
-        }
-
-        await execute("UPDATE users SET role = ? WHERE id = ?", [role, userId]);
-        logger.info("users.updateUserRole", { actorId: actor.id, userId, role });
         invalidate();
         return { ok: true };
     } catch (e) {
-        return toActionResult(e);
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            const msg = (body?.error as string) || e.message;
+            const code: ErrorCode =
+                e.status === 403 ? "FORBIDDEN" :
+                e.status === 404 ? "NOT_FOUND" :
+                e.status === 409 ? "CONFLICT" :
+                "INTERNAL";
+            return { ok: false, error: msg, code };
+        }
+        return { ok: false, error: "Unexpected error" };
     }
 }
 
@@ -159,7 +157,7 @@ export async function setUserActive(input: {
     userId: string;
     isActive: boolean;
 }): Promise<Ok<object> | Fail> {
-    const actor = await requireAuth(UserRole.HR_HEAD);
+    const user = await requireAuth(UserRole.HR_HEAD);
 
     const parsed = SetActiveSchema.safeParse(input);
     if (!parsed.success) {
@@ -168,48 +166,25 @@ export async function setUserActive(input: {
     const { userId, isActive } = parsed.data;
 
     try {
-        if (userId === actor.id && !isActive) {
-            throw new AppError(
-                "FORBIDDEN",
-                "You cannot deactivate your own account."
-            );
-        }
+        await api(`/users/${userId}/active/`, {
+            method: "PATCH",
+            body: { is_active: isActive },
+            userId: user.id,
+        });
 
-        const target = await queryOne<{ id: string; role: UserRole; is_active: 0 | 1 }>(
-            "SELECT id, role, is_active FROM users WHERE id = ? LIMIT 1",
-            [userId]
-        );
-        if (!target) throw new AppError("NOT_FOUND", "User not found.");
-
-        if (!isActive && target.role === UserRole.HR_HEAD) {
-            await assertAnotherHRHeadExists(target.id);
-        }
-
-        await execute("UPDATE users SET is_active = ? WHERE id = ?", [
-            isActive ? 1 : 0,
-            userId,
-        ]);
-        logger.info("users.setUserActive", { actorId: actor.id, userId, isActive });
         invalidate();
         return { ok: true };
     } catch (e) {
-        return toActionResult(e);
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            const msg = (body?.error as string) || e.message;
+            const code: ErrorCode =
+                e.status === 403 ? "FORBIDDEN" :
+                e.status === 404 ? "NOT_FOUND" :
+                e.status === 409 ? "CONFLICT" :
+                "INTERNAL";
+            return { ok: false, error: msg, code };
+        }
+        return { ok: false, error: "Unexpected error" };
     }
 }
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-async function assertAnotherHRHeadExists(excludeUserId: string): Promise<void> {
-    const row = await queryOne<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM users
-         WHERE role = 'HR_HEAD' AND is_active = 1 AND id <> ?`,
-        [excludeUserId]
-    );
-    if (!row || Number(row.n) === 0) {
-        throw new AppError(
-            "CONFLICT",
-            "There must always be at least one active HR Head. Add another HR Head before making this change."
-        );
-    }
-}
-

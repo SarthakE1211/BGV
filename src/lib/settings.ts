@@ -1,13 +1,12 @@
 // src/lib/settings.ts
 //
 // Single source of truth for app-level toggles (M365 integrations, vendor
-// enables, notification rules). Missing rows fall back to SETTING_DEFAULTS
-// so a fresh DB / missing key is always safe.
+// enables, notification rules). Calls Django REST API instead of direct SQL.
 //
-// Keys are stable strings — the Settings UI binds to these, and the email
-// gateway reads notification.* keys to decide whether to skip a send.
+// SETTING_DEFAULTS and settingKeyForTrigger are kept locally since they're
+// used by other modules without needing a network call.
 
-import { query, execute } from "@/src/lib/db";
+import { api } from "@/src/lib/api-client";
 
 export const SETTING_DEFAULTS = {
     // Microsoft 365 Integration
@@ -34,11 +33,27 @@ export const SETTING_KEYS = Object.keys(SETTING_DEFAULTS) as SettingKey[];
 
 /** Load all settings as a `{ key: boolean }` map, with defaults applied for
  *  any key not yet persisted. */
-export async function getAllSettings(): Promise<Record<SettingKey, boolean>> {
-    const rows = await query<{ key: string; value: string }>(
-        `SELECT \`key\`, \`value\` FROM app_settings`
-    );
-    const stored = new Map(rows.map((r) => [r.key, r.value === "1"]));
+export async function getAllSettings(
+    userId?: string
+): Promise<Record<SettingKey, boolean>> {
+    interface SettingRow {
+        key: string;
+        value: string | boolean;
+        is_on?: boolean;
+    }
+
+    const rows = await api<SettingRow[]>("/settings/", { userId });
+    const stored = new Map<string, boolean>();
+    for (const r of rows) {
+        const val =
+            typeof r.value === "boolean"
+                ? r.value
+                : typeof r.is_on === "boolean"
+                  ? r.is_on
+                  : r.value === "1" || r.value === "true";
+        stored.set(r.key, val);
+    }
+
     const out = { ...SETTING_DEFAULTS } as Record<SettingKey, boolean>;
     for (const k of SETTING_KEYS) {
         if (stored.has(k)) out[k] = stored.get(k)!;
@@ -47,28 +62,25 @@ export async function getAllSettings(): Promise<Record<SettingKey, boolean>> {
 }
 
 /** Read a single setting, falling back to its default. */
-export async function getSetting(key: SettingKey): Promise<boolean> {
-    const rows = await query<{ value: string }>(
-        "SELECT `value` FROM app_settings WHERE `key` = ? LIMIT 1",
-        [key]
-    );
-    if (rows.length === 0) return SETTING_DEFAULTS[key];
-    return rows[0].value === "1";
+export async function getSetting(
+    key: SettingKey,
+    userId?: string
+): Promise<boolean> {
+    const all = await getAllSettings(userId);
+    return all[key];
 }
 
-/** Upsert one setting. Callers are expected to pass a validated key. */
+/** Upsert one setting. Calls the Django toggle endpoint. */
 export async function setSetting(
     key: SettingKey,
     value: boolean,
     updatedById: string | null
 ): Promise<void> {
-    await execute(
-        `INSERT INTO app_settings (\`key\`, \`value\`, updated_by_id)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`),
-                                 updated_by_id = VALUES(updated_by_id)`,
-        [key, value ? "1" : "0", updatedById]
-    );
+    await api("/settings/toggle/", {
+        method: "POST",
+        body: { key, value },
+        userId: updatedById ?? undefined,
+    });
 }
 
 /** Map each email trigger to the setting key that gates it. Returns null for

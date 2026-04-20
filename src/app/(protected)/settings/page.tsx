@@ -138,10 +138,10 @@ const ROLE_PERMS: RoleRow[] = [
 const PERM_COLUMNS = Object.keys(ROLE_PERMS[0].perms);
 
 export default async function SettingsPage() {
-    await requireAuth("HR_HEAD");
+    const user = await requireAuth("HR_HEAD");
     const [settings, templateMeta] = await Promise.all([
-        getAllSettings(),
-        getTemplateMeta(CLEARANCE_TEMPLATE_KEY),
+        getAllSettings(user.id),
+        getTemplateMeta(CLEARANCE_TEMPLATE_KEY, user.id),
     ]);
 
     const render = (defs: ToggleDef[]) =>

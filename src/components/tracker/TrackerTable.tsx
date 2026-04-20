@@ -31,6 +31,7 @@ interface Props {
 
 export default function TrackerTable({ rows, filtersSlot, viewerRole, specialists }: Props) {
     const canActOnChecks = viewerRole === "SPECIALIST" || viewerRole === "HR_HEAD";
+    const canAssignSpecialist = viewerRole === "HR_HEAD";
     const groups = groupByRequest(rows);
 
     return (
@@ -56,6 +57,7 @@ export default function TrackerTable({ rows, filtersSlot, viewerRole, specialist
                             groups={groups}
                             specialists={specialists}
                             canActOnChecks={canActOnChecks}
+                            canAssignSpecialist={canAssignSpecialist}
                         />
                     </tbody>
                 </table>

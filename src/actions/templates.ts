@@ -1,18 +1,12 @@
 "use server";
 
-// HR_HEAD-only. Receives the uploaded .docx from the Settings form,
-// validates it, and persists to the `app_templates` table.
+// HR_HEAD-only. Uploads/deletes .docx clearance templates via Django API.
 
 import { revalidatePath } from "next/cache";
 import { requireAuth } from "@/src/lib/auth.helpers";
-import {
-    CLEARANCE_TEMPLATE_KEY,
-    saveTemplate,
-    deleteTemplate,
-} from "@/src/lib/templates";
+import { api, ApiError } from "@/src/lib/api-client";
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB — .docx templates are tiny
-const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export type UploadTemplateResult =
     | { ok: true; filename: string; sizeBytes: number }
@@ -43,17 +37,45 @@ export async function uploadClearanceTemplate(
         };
     }
 
-    const buf = Buffer.from(await file.arrayBuffer());
-    await saveTemplate(
-        CLEARANCE_TEMPLATE_KEY,
-        file.name,
-        file.type || DOCX_MIME,
-        buf,
-        user.id
-    );
+    try {
+        const uploadForm = new FormData();
+        uploadForm.append("file", file);
 
-    revalidatePath("/settings");
-    return { ok: true, filename: file.name, sizeBytes: buf.length };
+        const result = await api<{
+            filename?: string;
+            size_bytes?: number;
+            sizeBytes?: number;
+        }>("/templates/", {
+            method: "POST",
+            userId: user.id,
+            formData: uploadForm,
+        });
+
+        revalidatePath("/settings");
+        return {
+            ok: true,
+            filename: result.filename ?? file.name,
+            sizeBytes: result.size_bytes ?? result.sizeBytes ?? file.size,
+        };
+    } catch (e) {
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            return {
+                ok: false,
+                error:
+                    (body?.error as string) ??
+                    (body?.detail as string) ??
+                    e.message,
+            };
+        }
+        return {
+            ok: false,
+            error:
+                e instanceof Error
+                    ? e.message
+                    : "An unexpected error occurred",
+        };
+    }
 }
 
 export async function deleteClearanceTemplate(): Promise<
@@ -63,7 +85,31 @@ export async function deleteClearanceTemplate(): Promise<
     if (user.role !== "HR_HEAD") {
         return { ok: false, error: "Only HR Head can remove the template" };
     }
-    await deleteTemplate(CLEARANCE_TEMPLATE_KEY);
-    revalidatePath("/settings");
-    return { ok: true };
+
+    try {
+        await api("/templates/clearance/", {
+            method: "DELETE",
+            userId: user.id,
+        });
+        revalidatePath("/settings");
+        return { ok: true };
+    } catch (e) {
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            return {
+                ok: false,
+                error:
+                    (body?.error as string) ??
+                    (body?.detail as string) ??
+                    e.message,
+            };
+        }
+        return {
+            ok: false,
+            error:
+                e instanceof Error
+                    ? e.message
+                    : "An unexpected error occurred",
+        };
+    }
 }

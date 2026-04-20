@@ -18,12 +18,12 @@ function pick(sp: Record<string, string | string[] | undefined>, key: string) {
 }
 
 export default async function BlacklistPage({ searchParams }: PageProps) {
-    await requireAuth("SPECIALIST");
+    const user = await requireAuth("SPECIALIST");
     const sp = await searchParams;
     const q = pick(sp, "q") ?? null;
     const page = Math.max(1, Number(pick(sp, "page") ?? 1) || 1);
 
-    const { rows, total } = await listBlacklist(q, page);
+    const { rows, total } = await listBlacklist(q, page, user.id);
 
     return (
         <>

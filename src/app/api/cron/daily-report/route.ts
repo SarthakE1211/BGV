@@ -1,16 +1,13 @@
-// src/app/api/cron/daily-report/route.ts
 // POST /api/cron/daily-report
-// Intended to be called by a cron job at 18:00 IST daily.
-// Secured with a shared CRON_SECRET header.
+// Proxies to Django's daily report endpoint. Called by cron at 18:00 IST.
 
 import { NextRequest, NextResponse } from "next/server";
-import { dispatchDailyReport } from "@/src/actions/reports";
+import { api } from "@/src/lib/api-client";
 import { logger } from "@/src/lib/logger";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-    // Simple bearer-token guard so this can't be called by anyone.
     const secret = process.env.CRON_SECRET;
     if (secret) {
         const auth = req.headers.get("authorization") ?? "";
@@ -20,8 +17,12 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        const result = await dispatchDailyReport();
-        logger.info("cron.daily-report dispatched", { sent: result.sent, failed: result.failed });
+        // Django handles compiling + emailing. We just trigger it.
+        const result = await api<{ sent: number; failed: number; recipients: string[] }>(
+            "/reports/send-daily/",
+            { method: "POST" }
+        );
+        logger.info("cron.daily-report dispatched", result);
         return NextResponse.json({ ok: true, ...result });
     } catch (err) {
         logger.error("cron.daily-report failed", { err });

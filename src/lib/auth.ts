@@ -1,11 +1,14 @@
 // src/lib/auth.ts
+//
+// NextAuth configuration. User lookups now go through Django API —
+// no direct SQL. If Django is down, sign-in fails gracefully.
+
 import { NextAuthOptions } from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
-import { execute, queryOne } from "@/src/lib/db";
 import type { UserRole } from "@/src/lib/enums";
 import { logger } from "@/src/lib/logger";
-import type { UserRow } from "@/src/lib/types";
-import { getSetting } from "@/src/lib/settings";
+
+const DJANGO_URL = process.env.DJANGO_API_URL || "http://localhost:8000/api";
 
 type AzureProfileExtras = {
     email?: string | null;
@@ -16,6 +19,24 @@ type AzureProfileExtras = {
     picture?: string | null;
 };
 
+/** Call Django API from NextAuth callbacks (no api-client import to avoid
+ *  circular deps — this is a standalone fetch). */
+async function djangoFetch<T>(path: string, opts: RequestInit = {}): Promise<T | null> {
+    try {
+        const res = await fetch(`${DJANGO_URL}${path}`, {
+            ...opts,
+            headers: {
+                "Content-Type": "application/json",
+                ...opts.headers,
+            },
+        });
+        if (!res.ok) return null;
+        return await res.json();
+    } catch {
+        return null;
+    }
+}
+
 export const authOptions: NextAuthOptions = {
     providers: [
         AzureADProvider({
@@ -25,10 +46,6 @@ export const authOptions: NextAuthOptions = {
             authorization: {
                 params: {
                     scope: "openid profile email offline_access User.Read",
-                    // Force Microsoft to show the account picker / credential prompt
-                    // every time. Without this, Azure AD silently re-authenticates
-                    // the cached account after signout — the user never gets a chance
-                    // to switch accounts or enter fresh credentials.
                     prompt: "select_account",
                 },
             },
@@ -36,14 +53,6 @@ export const authOptions: NextAuthOptions = {
     ],
 
     callbacks: {
-        /**
-         * Gate sign-in: users must already exist in the `users` table
-         * (pre-provisioned by HR Head). Unknown emails land on the public
-         * "Access Pending" page; disabled accounts are rejected.
-         *
-         * On first successful login we backfill azure_ad_id / name / image
-         * from the Azure AD profile (HR Head only entered the email).
-         */
         async signIn({ user, profile }) {
             const p = (profile ?? {}) as AzureProfileExtras;
             const email = (user?.email ?? p.email ?? p.preferred_username ?? "")
@@ -54,38 +63,49 @@ export const authOptions: NextAuthOptions = {
             if (!email) return "/auth/signin?error=MissingEmail";
 
             try {
-                const existing = await queryOne<UserRow>(
-                    `SELECT id, name, email, role, image, azure_ad_id, is_active
-                     FROM users WHERE email = ? LIMIT 1`,
-                    [email]
-                );
+                // Unauthenticated lookup — no auth needed during sign-in
+                const userRow = await djangoFetch<{
+                    found: boolean;
+                    id: string;
+                    role: string;
+                    is_active: boolean;
+                    azure_ad_id: string | null;
+                    name: string;
+                }>(`/users/auth-lookup/?email=${encodeURIComponent(email)}`);
 
-                if (!existing) return "/auth/access-pending";
-                if (!existing.is_active) return "/auth/signin?error=AccountDisabled";
+                if (!userRow || !userRow.found) return "/auth/access-pending";
+                if (!userRow.is_active) return "/auth/signin?error=AccountDisabled";
 
-                // Respect the /settings "M365 SSO Login" toggle. HR_HEAD is
-                // always allowed through — otherwise turning the toggle off
-                // would lock out the only role that can turn it back on.
-                const ssoEnabled = await getSetting("m365.sso_login").catch(() => true);
-                if (!ssoEnabled && existing.role !== "HR_HEAD") {
-                    logger.info("auth.signIn blocked by m365.sso_login toggle", { email });
-                    return "/auth/signin?error=SsoDisabled";
+                // Check SSO toggle — settings endpoint is also unauthenticated-safe
+                // since it just reads flags. If it fails, allow login (fail-open).
+                try {
+                    const settings = await djangoFetch<Array<{ key: string; value: string }>>("/settings/");
+                    if (settings && Array.isArray(settings)) {
+                        const ssoSetting = settings.find((s) => s.key === "m365.sso_login");
+                        if (ssoSetting && ssoSetting.value === "0" && userRow.role !== "HR_HEAD") {
+                            logger.info("auth.signIn blocked by m365.sso_login toggle", { email });
+                            return "/auth/signin?error=SsoDisabled";
+                        }
+                    }
+                } catch {
+                    // Settings check failed — fail-open, allow login
                 }
 
+                // Backfill azure_ad_id / name / image via the same unauthenticated endpoint
                 const azureAdId = (user?.id ?? p.oid ?? p.sub ?? null) as string | null;
-                const name = (user?.name ?? p.name ?? existing.name) as string;
-                const image = (user?.image ?? p.picture ?? existing.image) as string | null;
+                const name = (user?.name ?? p.name ?? "") as string;
+                const image = (user?.image ?? p.picture ?? null) as string | null;
 
-                const needsBackfill =
-                    existing.azure_ad_id !== azureAdId ||
-                    existing.name !== name ||
-                    (existing.image ?? null) !== (image ?? null);
-
-                if (needsBackfill) {
-                    await execute(
-                        `UPDATE users SET azure_ad_id = ?, name = ?, image = ? WHERE id = ?`,
-                        [azureAdId ?? existing.azure_ad_id, name, image, existing.id]
-                    );
+                if (azureAdId && azureAdId !== userRow.azure_ad_id) {
+                    await djangoFetch(`/users/auth-lookup/?email=${encodeURIComponent(email)}`, {
+                        method: "PATCH",
+                        body: JSON.stringify({
+                            email,
+                            azure_ad_id: azureAdId,
+                            name: name || undefined,
+                            image: image || undefined,
+                        }),
+                    });
                 }
 
                 return true;
@@ -95,13 +115,6 @@ export const authOptions: NextAuthOptions = {
             }
         },
 
-        /**
-         * Runs on every request. On first sign-in (account + profile present),
-         * copy id + role from DB onto the JWT. Subsequent calls just pass through.
-         *
-         * Transient DB failure: keep prior claims if we have them so the user
-         * isn't logged out; only fail hard when we have nothing to fall back on.
-         */
         async jwt({ token, account, profile }) {
             if (account && profile) {
                 const p = profile as AzureProfileExtras;
@@ -111,13 +124,16 @@ export const authOptions: NextAuthOptions = {
                     .toLowerCase();
 
                 try {
-                    const row = await queryOne<{ id: string; role: UserRole }>(
-                        "SELECT id, role FROM users WHERE email = ? LIMIT 1",
-                        [email]
-                    );
-                    if (row) {
-                        token.dbUserId = row.id;
-                        token.role = row.role;
+                    // Unauthenticated lookup for JWT claims
+                    const userRow = await djangoFetch<{
+                        found: boolean;
+                        id: string;
+                        role: UserRole;
+                    }>(`/users/auth-lookup/?email=${encodeURIComponent(email)}`);
+
+                    if (userRow && userRow.found) {
+                        token.dbUserId = userRow.id;
+                        token.role = userRow.role;
                     }
                     token.azureAdId = token.sub;
                     token.accessToken = account.access_token;
@@ -130,10 +146,6 @@ export const authOptions: NextAuthOptions = {
         },
 
         async session({ session, token }) {
-            console.log("session",session);
-            console.log("token",token);
-            
-            
             if (session.user) {
                 session.user.id = token.dbUserId as string;
                 session.user.role = token.role as UserRole;

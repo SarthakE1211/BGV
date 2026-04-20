@@ -1,16 +1,11 @@
 "use server";
 
-// Thin action shell over src/lib/services/blacklist.service.ts.
-
 import { z } from "zod";
 
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { blacklistCandidateByCheck } from "@/src/lib/services/blacklist.service";
-import { toActionResult, type ErrorCode } from "@/src/lib/errors";
+import { api, ApiError } from "@/src/lib/api-client";
+import { type ErrorCode } from "@/src/lib/errors";
 import { invalidateBlacklist } from "@/src/lib/revalidation";
-import { sendEmail } from "@/src/lib/email";
-import { queryOne } from "@/src/lib/db";
-import { logger } from "@/src/lib/logger";
 
 const Schema = z.object({
     checkId: z.string().min(1, "checkId required"),
@@ -32,35 +27,28 @@ export async function blacklistCandidate(input: {
     const { checkId, reason } = parsed.data;
 
     try {
-        const result = await blacklistCandidateByCheck(checkId, reason, user);
-
-        void enqueueBlacklistedEmail(result.requestId).catch((err) =>
-            logger.error("email.CANDIDATE_BLACKLISTED failed", {
-                err,
-                requestId: result.requestId,
-            })
+        const result = await api<{ request_id: string }>(
+            `/bgv/checks/${checkId}/blacklist/`,
+            {
+                method: "POST",
+                body: { reason },
+                userId: user.id,
+            }
         );
 
-        invalidateBlacklist(result.requestId);
-        return { ok: true, requestId: result.requestId };
+        invalidateBlacklist(result.request_id);
+        return { ok: true, requestId: result.request_id };
     } catch (e) {
-        return toActionResult(e);
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            const msg = (body?.error as string) || e.message;
+            const code: ErrorCode =
+                e.status === 404 ? "NOT_FOUND" :
+                e.status === 422 ? "BLACKLISTED" :
+                e.status === 403 ? "FORBIDDEN" :
+                "INTERNAL";
+            return { ok: false, error: msg, code };
+        }
+        return { ok: false, error: "Unexpected error" };
     }
-}
-
-async function enqueueBlacklistedEmail(requestId: string) {
-    const row = await queryOne<{ email: string }>(
-        `SELECT u.email
-         FROM bgv_requests r
-         JOIN users u ON u.id = r.submitted_by_id
-         WHERE r.id = ? LIMIT 1`,
-        [requestId]
-    );
-    if (!row?.email) return;
-    await sendEmail({
-        trigger: "CANDIDATE_BLACKLISTED",
-        requestId,
-        recipient: row.email,
-        subject: "Candidate has been blacklisted",
-    });
 }

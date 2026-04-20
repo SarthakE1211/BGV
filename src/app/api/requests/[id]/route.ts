@@ -23,8 +23,8 @@ export async function GET(
     }
 
     const [checks, activity] = await Promise.all([
-        getRequestChecks(id),
-        getRequestActivity(id, 50),
+        getRequestChecks(id, user.id),
+        getRequestActivity(id, 50, user.id),
     ]);
 
     return NextResponse.json({ request, checks, activity });

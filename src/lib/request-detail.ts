@@ -1,13 +1,9 @@
 // src/lib/request-detail.ts
 //
-// Aggregated fetch for the request-detail page. One module owns:
-//   - the request + joined candidate/partner/client/SDM/approver
-//   - the list of bgv_checks for the request
-//   - the activity log feed
-//
-// Used by both the server page and the GET /api/requests/[id] endpoint.
+// Aggregated fetch for the request-detail page.
+// Calls Django REST API instead of direct MySQL queries.
 
-import { query, queryOne } from "@/src/lib/db";
+import { api } from "@/src/lib/api-client";
 import type {
     BGVStatus,
     BGVVendor,
@@ -65,192 +61,194 @@ export interface ActivityLogEntry {
     performedBy: string;
 }
 
-interface RequestRowRaw {
+// The Django API returns the detail with nested checks + activity in one call.
+// We'll parse the combined response and split it for the three functions.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+interface ApiDetailResponse {
     id: string;
-    request_number: string;
+    request_number?: string;
+    requestNumber?: string;
     status: BGVStatus;
     priority: Priority;
-    bgv_type: string;
-    role_type: RoleType;
+    bgv_type?: string;
+    bgvType?: string;
+    role_type?: RoleType;
+    roleType?: RoleType;
     region: Region;
-    bgv_vendor: BGVVendor;
+    bgv_vendor?: BGVVendor;
+    bgvVendor?: BGVVendor;
     notes: string | null;
-    created_at: Date;
-    initiation_date: Date | null;
-    completion_date: Date | null;
-    candidate_id: string;
-    candidate_name: string;
-    candidate_email: string;
-    candidate_phone: string | null;
-    candidate_blacklisted: 0 | 1;
-    partner_id: string;
-    partner_name: string;
-    partner_code: string;
-    client_id: string | null;
-    client_name: string | null;
-    client_account: string | null;
-    submitted_by_id: string;
-    submitted_by_name: string;
-    submitted_by_email: string;
-    approved_by_id: string | null;
-    approved_by_name: string | null;
-    assigned_specialist_id: string | null;
-    assigned_specialist_name: string | null;
-    assigned_specialist_email: string | null;
+    created_at?: string;
+    createdAt?: string;
+    initiation_date?: string | null;
+    initiationDate?: string | null;
+    completion_date?: string | null;
+    completionDate?: string | null;
+    client_account?: string | null;
+    clientAccount?: string | null;
+    candidate: any;
+    partner: any;
+    client?: any;
+    submitted_by?: any;
+    submittedBy?: any;
+    approved_by?: any;
+    approvedBy?: any;
+    assigned_specialist?: any;
+    assignedSpecialist?: any;
+    checks?: any[];
+    activity?: any[];
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+function mapDetail(r: ApiDetailResponse): RequestDetailRow {
+    const candidate = r.candidate ?? {};
+    const partner = r.partner ?? {};
+    const client = r.client;
+    const submittedBy = r.submitted_by ?? r.submittedBy ?? {};
+    const approvedBy = r.approved_by ?? r.approvedBy;
+    const specialist = r.assigned_specialist ?? r.assignedSpecialist;
+
+    return {
+        id: r.id,
+        requestNumber: r.request_number ?? r.requestNumber ?? "",
+        status: r.status,
+        priority: r.priority,
+        bgvType: r.bgv_type ?? r.bgvType ?? "",
+        roleType: r.role_type ?? r.roleType ?? ("FTE_W2" as RoleType),
+        region: r.region,
+        bgvVendor: r.bgv_vendor ?? r.bgvVendor ?? ("DISA" as BGVVendor),
+        notes: r.notes,
+        createdAt: new Date(r.created_at ?? r.createdAt ?? ""),
+        initiationDate: (r.initiation_date ?? r.initiationDate)
+            ? new Date((r.initiation_date ?? r.initiationDate)!)
+            : null,
+        completionDate: (r.completion_date ?? r.completionDate)
+            ? new Date((r.completion_date ?? r.completionDate)!)
+            : null,
+        clientAccount: r.client_account ?? r.clientAccount ?? null,
+        candidate: {
+            id: candidate.id ?? "",
+            name: candidate.name ?? "",
+            email: candidate.email ?? "",
+            phone: candidate.phone ?? null,
+            isBlacklisted: Boolean(
+                candidate.is_blacklisted ?? candidate.isBlacklisted ?? false
+            ),
+        },
+        partner: {
+            id: partner.id ?? "",
+            name: partner.name ?? "",
+            code: partner.code ?? "",
+        },
+        client: client
+            ? {
+                  id: client.id ?? "",
+                  name: client.name ?? client.client_name ?? client.clientName ?? "",
+              }
+            : null,
+        submittedBy: {
+            id: submittedBy.id ?? "",
+            name: submittedBy.name ?? "",
+            email: submittedBy.email ?? "",
+        },
+        approvedBy: approvedBy
+            ? { id: approvedBy.id ?? "", name: approvedBy.name ?? "" }
+            : null,
+        assignedSpecialist: specialist
+            ? {
+                  id: specialist.id ?? "",
+                  name: specialist.name ?? "",
+                  email: specialist.email ?? "",
+              }
+            : null,
+    };
 }
 
 /**
- * Fetch full request detail. Enforces SDM scope: an SDM only sees their
- * own requests; everyone else sees all. Returns null on miss / forbidden.
+ * Fetch full request detail. The Django API handles role-scoping via the
+ * X-User-Id header. Returns null on 404 or 403.
  */
 export async function getRequestDetail(
     id: string,
     role: UserRole,
     userId: string
 ): Promise<RequestDetailRow | null> {
-    const row = await queryOne<RequestRowRaw>(
-        `SELECT
-            r.id, r.request_number, r.status, r.priority, r.bgv_type,
-            r.role_type, r.region, r.bgv_vendor, r.notes,
-            r.created_at, r.initiation_date, r.completion_date,
-            c.id   AS candidate_id,
-            c.name AS candidate_name,
-            c.email AS candidate_email,
-            c.phone AS candidate_phone,
-            c.is_blacklisted AS candidate_blacklisted,
-            p.id   AS partner_id,
-            p.name AS partner_name,
-            p.code AS partner_code,
-            r.client_account,
-            pc.id          AS client_id,
-            pc.client_name AS client_name,
-            sb.id    AS submitted_by_id,
-            sb.name  AS submitted_by_name,
-            sb.email AS submitted_by_email,
-            ab.id   AS approved_by_id,
-            ab.name AS approved_by_name,
-            asp.id    AS assigned_specialist_id,
-            asp.name  AS assigned_specialist_name,
-            asp.email AS assigned_specialist_email
-         FROM bgv_requests r
-         JOIN candidates c ON c.id = r.candidate_id
-         JOIN partners   p ON p.id = r.partner_id
-         JOIN users      sb ON sb.id = r.submitted_by_id
-         LEFT JOIN partner_clients pc ON pc.id = r.partner_client_id
-         LEFT JOIN users           ab ON ab.id = r.approved_by_id
-         LEFT JOIN users           asp ON asp.id = r.assigned_specialist_id
-         WHERE r.id = ?
-         LIMIT 1`,
-        [id]
-    );
-    if (!row) return null;
-
-    if (role === "SDM" && row.submitted_by_id !== userId) return null;
-    if (role === "SPECIALIST" && row.assigned_specialist_id !== userId) return null;
-
-    return {
-        id: row.id,
-        requestNumber: row.request_number,
-        status: row.status,
-        priority: row.priority,
-        bgvType: row.bgv_type,
-        roleType: row.role_type,
-        region: row.region,
-        bgvVendor: row.bgv_vendor,
-        notes: row.notes,
-        createdAt: row.created_at,
-        initiationDate: row.initiation_date,
-        completionDate: row.completion_date,
-        candidate: {
-            id: row.candidate_id,
-            name: row.candidate_name,
-            email: row.candidate_email,
-            phone: row.candidate_phone,
-            isBlacklisted: Boolean(row.candidate_blacklisted),
-        },
-        partner: { id: row.partner_id, name: row.partner_name, code: row.partner_code },
-        clientAccount: row.client_account,
-        client: row.client_name || row.client_account
-            ? { id: row.client_id ?? "", name: row.client_name ?? row.client_account ?? "" }
-            : null,
-        submittedBy: {
-            id: row.submitted_by_id,
-            name: row.submitted_by_name,
-            email: row.submitted_by_email,
-        },
-        approvedBy: row.approved_by_id
-            ? { id: row.approved_by_id, name: row.approved_by_name ?? "" }
-            : null,
-        assignedSpecialist: row.assigned_specialist_id
-            ? {
-                  id: row.assigned_specialist_id,
-                  name: row.assigned_specialist_name ?? "",
-                  email: row.assigned_specialist_email ?? "",
-              }
-            : null,
-    };
+    try {
+        const data = await api<ApiDetailResponse>(
+            `/bgv/requests/${id}/`,
+            { userId }
+        );
+        return mapDetail(data);
+    } catch (e: unknown) {
+        if (
+            e &&
+            typeof e === "object" &&
+            "status" in e &&
+            ((e as { status: number }).status === 404 ||
+                (e as { status: number }).status === 403)
+        ) {
+            return null;
+        }
+        throw e;
+    }
 }
 
-export async function getRequestChecks(requestId: string): Promise<CheckDetailRow[]> {
-    const rows = await query<{
-        id: string;
-        check_type: string;
-        requirement_source: string | null;
-        status: CheckStatus;
-        started_at: Date | null;
-        completed_at: Date | null;
-        remarks: string | null;
-        assigned_to_name: string | null;
-    }>(
-        `SELECT
-            ch.id, ch.check_type, ch.requirement_source, ch.status,
-            ch.started_at, ch.completed_at, ch.remarks,
-            u.name AS assigned_to_name
-         FROM bgv_checks ch
-         LEFT JOIN users u ON u.id = ch.assigned_to_id
-         WHERE ch.bgv_request_id = ?
-         ORDER BY ch.created_at ASC`,
-        [requestId]
-    );
-    return rows.map((r) => ({
-        id: r.id,
-        checkType: r.check_type,
-        requirementSource: r.requirement_source,
-        status: r.status,
-        startedAt: r.started_at,
-        completedAt: r.completed_at,
-        remarks: r.remarks,
-        assignedTo: r.assigned_to_name,
-    }));
+export async function getRequestChecks(
+    requestId: string,
+    userId?: string
+): Promise<CheckDetailRow[]> {
+    // The detail endpoint returns checks nested. Fetch the detail and
+    // extract the checks array.
+    try {
+        const data = await api<ApiDetailResponse>(
+            `/bgv/requests/${requestId}/`,
+            { userId }
+        );
+
+        const checks = data.checks ?? [];
+        return checks.map((c: any) => ({
+            id: c.id,
+            checkType: c.check_type ?? c.checkType ?? "",
+            requirementSource:
+                c.requirement_source ?? c.requirementSource ?? null,
+            status: c.status,
+            startedAt: (c.started_at ?? c.startedAt)
+                ? new Date((c.started_at ?? c.startedAt)!)
+                : null,
+            completedAt: (c.completed_at ?? c.completedAt)
+                ? new Date((c.completed_at ?? c.completedAt)!)
+                : null,
+            remarks: c.remarks ?? null,
+            assignedTo: c.assigned_to_name ?? c.assigned_to ?? c.assignedTo ?? null,
+        }));
+    } catch {
+        return [];
+    }
 }
 
 export async function getRequestActivity(
     requestId: string,
-    limit = 50
+    limit = 50,
+    userId?: string
 ): Promise<ActivityLogEntry[]> {
-    const safeLimit = Math.max(1, Math.min(200, Math.floor(limit)));
-    const rows = await query<{
-        id: string;
-        action: string;
-        details: string | null;
-        created_at: Date;
-        performed_by: string;
-    }>(
-        `SELECT
-            a.id, a.action, a.details, a.created_at,
-            u.name AS performed_by
-         FROM activity_logs a
-         JOIN users u ON u.id = a.performed_by_id
-         WHERE a.bgv_request_id = ?
-         ORDER BY a.created_at DESC
-         LIMIT ${safeLimit}`,
-        [requestId]
-    );
-    return rows.map((r) => ({
-        id: r.id,
-        action: r.action,
-        details: r.details,
-        createdAt: r.created_at,
-        performedBy: r.performed_by,
-    }));
+    try {
+        const data = await api<ApiDetailResponse>(
+            `/bgv/requests/${requestId}/`,
+            { userId }
+        );
+
+        const activity = data.activity ?? [];
+        return activity
+            .slice(0, limit)
+            .map((a: any) => ({
+                id: a.id,
+                action: a.action,
+                details: a.details ?? null,
+                createdAt: new Date(a.created_at ?? a.createdAt ?? ""),
+                performedBy: a.performed_by ?? a.performedBy ?? "",
+            }));
+    } catch {
+        return [];
+    }
 }

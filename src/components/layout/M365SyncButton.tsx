@@ -13,13 +13,13 @@ export default function M365SyncButton() {
             const res = await syncM365Users();
             if (res.ok) {
                 console.log("res",res)
-                const { total, created, updated, skipped, durationMs } = res.result;
-                toast.success(
-                    `Synced ${total} user${total === 1 ? "" : "s"} — ${created} new, ${updated} updated${
-                        skipped ? `, ${skipped} skipped` : ""
-                    } (${Math.round(durationMs / 100) / 10}s)`,
-                    { id }
-                );
+                const { created, updated, skipped, deactivated, total, durationMs } = res.result;
+                const sum = total ?? (created + updated + (skipped ?? 0) + (deactivated ?? 0));
+                let msg = `Synced ${sum} user${sum === 1 ? "" : "s"} — ${created} new, ${updated} updated`;
+                if (skipped) msg += `, ${skipped} skipped`;
+                if (deactivated) msg += `, ${deactivated} deactivated`;
+                if (durationMs) msg += ` (${Math.round(durationMs / 100) / 10}s)`;
+                toast.success(msg, { id });
             } else {
                 toast.error(res.error, { id });
             }

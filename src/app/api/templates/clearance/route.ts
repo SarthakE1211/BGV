@@ -1,10 +1,8 @@
-// GET /api/templates/clearance
-// Serves the uploaded clearance letter .docx template for HR Head review.
-// HR_HEAD only.
+// GET /api/templates/clearance — proxies to Django template download.
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { getTemplate, CLEARANCE_TEMPLATE_KEY } from "@/src/lib/templates";
+import { api } from "@/src/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +12,26 @@ export async function GET() {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const tpl = await getTemplate(CLEARANCE_TEMPLATE_KEY);
-    if (!tpl) {
+    try {
+        const res = await api<Response>("/settings/templates/clearance_letter/download/", {
+            userId: user.id,
+            raw: true,
+        });
+
+        const rawRes = res as unknown as Response;
+        const bytes = await rawRes.arrayBuffer();
+        const contentType = rawRes.headers.get("Content-Type") ?? "application/octet-stream";
+        const disposition = rawRes.headers.get("Content-Disposition") ?? 'attachment; filename="template.docx"';
+
+        return new NextResponse(bytes, {
+            status: 200,
+            headers: {
+                "Content-Type": contentType,
+                "Content-Disposition": disposition,
+                "Content-Length": String(bytes.byteLength),
+            },
+        });
+    } catch {
         return NextResponse.json({ error: "No template uploaded" }, { status: 404 });
     }
-
-    return new NextResponse(new Uint8Array(tpl.bytes), {
-        status: 200,
-        headers: {
-            "Content-Type": tpl.mimeType,
-            "Content-Disposition": `attachment; filename="${tpl.filename.replace(/"/g, "")}"`,
-            "Content-Length": String(tpl.sizeBytes),
-        },
-    });
 }

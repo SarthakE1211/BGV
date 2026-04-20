@@ -1,7 +1,7 @@
 // src/app/(protected)/layout.tsx
 
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { queryOne } from "@/src/lib/db";
+import { api } from "@/src/lib/api-client";
 import Sidebar from "@/src/components/layout/Sidebar";
 import Topbar from "@/src/components/layout/Topbar";
 
@@ -19,15 +19,16 @@ export default async function ProtectedLayout({
         .slice(0, 2)
         .toUpperCase();
 
-    const row = await queryOne<{ n: number }>(
-        user.role === "SDM"
-            ? `SELECT COUNT(*) AS n FROM bgv_requests WHERE submitted_by_id = ?`
-            : user.role === "SPECIALIST"
-              ? `SELECT COUNT(*) AS n FROM bgv_requests WHERE assigned_specialist_id = ?`
-              : `SELECT COUNT(*) AS n FROM bgv_requests`,
-        user.role === "HR_HEAD" ? [] : [user.id]
-    );
-    const pendingCount = Number(row?.n ?? 0);
+    // Get pending count from Django tab_counts endpoint (role-scoped).
+    let pendingCount = 0;
+    try {
+        const counts = await api<{ all?: number }>("/bgv/requests/tab_counts/", {
+            userId: user.id,
+        });
+        pendingCount = Number(counts.all ?? 0);
+    } catch {
+        // Graceful fallback — sidebar still renders, badge shows 0.
+    }
 
     return (
         <>

@@ -1,12 +1,13 @@
 "use server";
 
 // HR_HEAD-only admin actions for the Partners & Checks configuration page.
+// Calls Django REST API instead of direct SQL.
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { execute, queryOne } from "@/src/lib/db";
+import { api, ApiError } from "@/src/lib/api-client";
 
 const ChecksInput = z.object({
     partnerId: z.string().min(1),
@@ -26,7 +27,10 @@ export async function updatePartnerStandardChecks(
 ): Promise<UpdateStandardChecksResult> {
     const user = await requireAuth();
     if (user.role !== "HR_HEAD") {
-        return { ok: false, error: "Only HR Head can edit partner configuration" };
+        return {
+            ok: false,
+            error: "Only HR Head can edit partner configuration",
+        };
     }
 
     const parsed = ChecksInput.safeParse(raw);
@@ -44,19 +48,34 @@ export async function updatePartnerStandardChecks(
         normalized.push(c.trim());
     }
 
-    const exists = await queryOne<{ id: string }>(
-        `SELECT id FROM partners WHERE id = ? LIMIT 1`,
-        [parsed.data.partnerId]
-    );
-    if (!exists) {
-        return { ok: false, error: "Partner not found" };
+    try {
+        await api(
+            `/partners/config/${parsed.data.partnerId}/standard_checks/`,
+            {
+                method: "PATCH",
+                userId: user.id,
+                body: { standard_checks: normalized },
+            }
+        );
+        revalidatePath("/partners");
+        return { ok: true };
+    } catch (e) {
+        if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | undefined;
+            return {
+                ok: false,
+                error:
+                    (body?.error as string) ??
+                    (body?.detail as string) ??
+                    e.message,
+            };
+        }
+        return {
+            ok: false,
+            error:
+                e instanceof Error
+                    ? e.message
+                    : "An unexpected error occurred",
+        };
     }
-
-    await execute(
-        `UPDATE partners SET standard_checks = ? WHERE id = ?`,
-        [JSON.stringify(normalized), parsed.data.partnerId]
-    );
-
-    revalidatePath("/partners");
-    return { ok: true };
 }

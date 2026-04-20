@@ -10,7 +10,7 @@ import {
     type CreateBGVRequestInput,
     type CreateBGVRequestResult,
 } from "@/src/actions/requests";
-import type { PartnerOption } from "@/src/lib/partners";
+import type { PartnerOption } from "@/src/lib/requests";
 import type { Region, RoleType, Priority } from "@/src/lib/enums";
 
 const REGION_DEFAULT_COUNTRY: Record<Region, string> = {

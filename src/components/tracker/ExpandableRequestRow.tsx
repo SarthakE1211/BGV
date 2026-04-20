@@ -17,6 +17,7 @@ interface Props {
     clientName: string | null;
     checks: TrackerRow[];
     canActOnChecks: boolean;
+    canAssignSpecialist: boolean;
     open: boolean;
     onToggle: () => void;
     specialists: Array<{ id: string; name: string }>;
@@ -53,6 +54,7 @@ export default function ExpandableRequestRow({
     clientName,
     checks,
     canActOnChecks,
+    canAssignSpecialist,
     open,
     onToggle,
     specialists,
@@ -132,9 +134,9 @@ export default function ExpandableRequestRow({
                     )}
                 </td>
 
-                {/* Assign specialist dropdown */}
+                {/* Assign specialist dropdown — HR_HEAD only */}
                 <td onClick={(e) => e.stopPropagation()}>
-                    {canActOnChecks ? (
+                    {canAssignSpecialist ? (
                         <select
                             value={currentSpecialistId}
                             disabled={assigning}

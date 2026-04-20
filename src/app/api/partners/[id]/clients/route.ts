@@ -1,12 +1,8 @@
-// src/app/api/partners/[id]/clients/route.ts
-//
-// GET /api/partners/[id]/clients
-// Returns the list of client accounts for a given partner — used to
-// populate the "Client Account" dropdown in the New Request form.
+// GET /api/partners/[id]/clients — proxies to Django.
 
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/src/lib/auth.helpers";
-import { query } from "@/src/lib/db";
+import { api } from "@/src/lib/api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -14,18 +10,21 @@ export async function GET(
     _req: Request,
     { params }: { params: Promise<{ id: string }> }
 ) {
-    await requireAuth();
+    const user = await requireAuth();
     const { id } = await params;
 
-    const clients = await query<{ id: string; client_name: string }>(
-        `SELECT id, client_name
-         FROM partner_clients
-         WHERE partner_id = ?
-         ORDER BY client_name ASC`,
-        [id]
-    );
-
-    return NextResponse.json({
-        clients: clients.map((c) => ({ id: c.id, clientName: c.client_name })),
-    });
+    try {
+        const clients = await api<Array<{ id: string; client_name?: string; clientName?: string }>>(
+            "/partners/clients/",
+            { userId: user.id, params: { partner_id: id } }
+        );
+        return NextResponse.json({
+            clients: clients.map((c) => ({
+                id: c.id,
+                clientName: c.client_name ?? c.clientName ?? "",
+            })),
+        });
+    } catch {
+        return NextResponse.json({ clients: [] });
+    }
 }
